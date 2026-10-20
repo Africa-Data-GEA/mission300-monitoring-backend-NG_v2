@@ -1,0 +1,13 @@
+CREATE TYPE "LearningLogType" AS ENUM ('DECISION', 'LEARNING');
+
+ALTER TYPE "LearningLogStatus" ADD VALUE IF NOT EXISTS 'CAPTURED';
+ALTER TYPE "LearningLogStatus" ADD VALUE IF NOT EXISTS 'APPLIED';
+
+ALTER TABLE "learning_log_entries"
+  ADD COLUMN "entryType" "LearningLogType" NOT NULL DEFAULT 'DECISION',
+  ADD COLUMN "context" TEXT NOT NULL DEFAULT '',
+  ADD COLUMN "lesson" TEXT NOT NULL DEFAULT '',
+  ADD COLUMN "recommendation" TEXT NOT NULL DEFAULT '',
+  ADD COLUMN "evidence" TEXT NOT NULL DEFAULT '',
+  ALTER COLUMN "decision" SET DEFAULT '',
+  ALTER COLUMN "rationale" SET DEFAULT '';

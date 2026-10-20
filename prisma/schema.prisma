@@ -98,6 +98,8 @@ model User {
   status         AccountStatus @default(PENDING)
   institutionId  String?
   institution    Institution? @relation(fields: [institutionId], references: [id])
+  /// A reviewer or validator who reviews every institution. Only an administrator sets it; a blank institution never grants it.
+  reviewsAllInstitutions Boolean @default(false)
   /// Set on every successful login (see auth.service.ts) - null for an
   /// invited account that has never signed in, matching userAccountSchema's
   /// lastLogin exactly.
@@ -1052,6 +1054,14 @@ model AuditLogEntry {
 model BrandingSettings {
   id             String   @id @default("default")
   countryName    String   @default("Nigeria")
+  /// e.g. "Federal Republic of Nigeria" - the formal name used on the public pages.
+  officialName   String   @default("Federal Republic of Nigeria")
+  /// The lead publishing agency shown on the public pages.
+  agencyName     String   @default("Federal Ministry of Power")
+  /// IANA timezone used to display dates and times.
+  timezone       String   @default("Africa/Lagos")
+  /// National crest or flag image; empty means the built-in default.
+  crestUrl       String   @default("")
   primaryColor   String   @default("#004972")
   secondaryColor String   @default("#ffca05")
   textColor      String   @default("#101828")
@@ -1260,6 +1270,13 @@ enum LearningLogStatus {
   PROPOSED
   DECIDED
   SUPERSEDED
+  CAPTURED
+  APPLIED
+}
+
+enum LearningLogType {
+  DECISION
+  LEARNING
 }
 
 /// The Learning & Decision Log - added per the SE4ALL MRL alignment review
@@ -1273,10 +1290,19 @@ model LearningLogEntry {
   id            String            @id @default(cuid())
   title         String
   area          LearningLogArea
-  /// What was decided or proposed.
-  decision      String
-  /// Why - what prompted the review and what it changed or will change.
-  rationale     String
+  entryType     LearningLogType   @default(DECISION)
+  /// What was decided or proposed. Empty for a learning.
+  decision      String            @default("")
+  /// Why - what prompted the review and what it changed or will change. Empty for a learning.
+  rationale     String            @default("")
+  /// Learning: what happened or was observed.
+  context       String            @default("")
+  /// Learning: what was learned from it.
+  lesson        String            @default("")
+  /// Learning: what to do differently next time.
+  recommendation String           @default("")
+  /// Learning: the data or source that supports it.
+  evidence      String            @default("")
   /// The KPI id, module, or record this decision affects. Null for a
   /// decision with no single affected record.
   relatedRecord String?
