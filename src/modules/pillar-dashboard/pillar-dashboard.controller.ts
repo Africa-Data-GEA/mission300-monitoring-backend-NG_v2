@@ -20,6 +20,6 @@ export class PillarDashboardController {
 
   @Get(":pillar")
   getDashboard(@Param("pillar") pillar: string, @Query() query: PillarDashboardQueryDto) {
-    return this.pillarDashboard.getDashboard(pillar, query.reportingPeriod);
+    return this.pillarDashboard.getDashboard(pillar, query.reportingPeriod, query.institution);
   }
 }

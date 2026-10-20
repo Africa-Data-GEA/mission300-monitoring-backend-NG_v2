@@ -1,5 +1,6 @@
 import { Injectable, InternalServerErrorException, NotFoundException } from "@nestjs/common";
 import { PrismaService } from "@/prisma/prisma.service";
+import { anyName, resolvePillarInstitutionFilter } from "@/modules/pillar-dashboard/pillar-institution-filter";
 import { toCatalogueRow, toKpiProfile } from "@/modules/kpi-explorer/kpi-explorer.mappers";
 import { toMilestoneRecord, toProgrammeRecord, toProjectRecord } from "@/modules/programs/programs.mappers";
 import {
@@ -35,7 +36,7 @@ const EXECUTION_STATUSES = ["ON_TRACK", "AT_RISK", "DELAYED", "BLOCKED", "COMPLE
 export class PillarDashboardService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async getDashboard(pillarSlug: string, reportingPeriod?: string) {
+  async getDashboard(pillarSlug: string, reportingPeriod?: string, institution?: string) {
     const pillar = await this.prisma.pillar.findUnique({ where: { slug: pillarSlug } });
     if (!pillar) throw new NotFoundException("Unknown Compact pillar.");
 
@@ -51,6 +52,19 @@ export class PillarDashboardService {
       include: KPI_PROFILE_INCLUDE,
     });
     const kpiIds = kpis.map((k) => k.id);
+    const filter = await resolvePillarInstitutionFilter(this.prisma, institution);
+    const ownedKpiIds = filter
+      ? new Set(
+          filter.institutionId
+            ? (
+                await this.prisma.kpiSourceInstitution.findMany({
+                  where: { institutionId: filter.institutionId, kpiDefinitionId: { in: kpiIds } },
+                  select: { kpiDefinitionId: true },
+                })
+              ).map((link) => link.kpiDefinitionId)
+            : [],
+        )
+      : null;
     const fetchedValues = kpiIds.length
       ? await this.prisma.kpiValue.findMany({
           where: { kpiDefinitionId: { in: kpiIds } },
@@ -107,6 +121,7 @@ export class PillarDashboardService {
     const coreIndicators = kpis
       .filter((kpi) => {
         if (headlineCodes.includes(kpi.code)) return false;
+        if (ownedKpiIds && !ownedKpiIds.has(kpi.id)) return false;
         // P4-001 is derived from the REA P4-009 snapshot. Keep the source KPI
         // in the catalogue, but don't repeat an identical current reading.
         if (pillarSlug === "private-sector-participation" && kpi.code === "M300-P4-009") {
@@ -118,17 +133,48 @@ export class PillarDashboardService {
       })
       .map((kpi) => toPillarCoreIndicator(profilesByCode.get(kpi.code)!, kpi.sourceDataset || "Other"));
 
+    const names = filter?.names ?? null;
     const [programmes, projects, bottlenecksRaw, milestonesRaw] = await Promise.all([
-      this.prisma.programme.findMany({ where: { pillarId: pillar.id }, include: PROGRAMME_INCLUDE }),
-      this.prisma.project.findMany({ where: { pillarId: pillar.id }, include: PROJECT_INCLUDE }),
-      this.prisma.bottleneck.findMany({ where: { pillarId: pillar.id }, include: BOTTLENECK_INCLUDE }),
+      this.prisma.programme.findMany({
+        where: {
+          pillarId: pillar.id,
+          ...(names
+            ? {
+                OR: [
+                  ...anyName(names).map((match) => ({ leadInstitution: match })),
+                  { supportingInstitutions: { hasSome: names } },
+                ],
+              }
+            : {}),
+        },
+        include: PROGRAMME_INCLUDE,
+      }),
+      this.prisma.project.findMany({
+        where: {
+          pillarId: pillar.id,
+          ...(names ? { OR: anyName(names).map((match) => ({ owner: match })) } : {}),
+        },
+        include: PROJECT_INCLUDE,
+      }),
+      this.prisma.bottleneck.findMany({
+        where: {
+          pillarId: pillar.id,
+          ...(names ? { OR: anyName(names).map((match) => ({ institution: match })) } : {}),
+        },
+        include: BOTTLENECK_INCLUDE,
+      }),
       // Real Milestone rows (the same model Programs' own project-detail
       // milestones tab reads) scoped to this pillar via their project's
       // pillarId - not the "any KPI whose unit is 'status'" stand-in the
       // frontend used to show under this same name. Honestly empty until
       // someone actually creates one for a project in this pillar.
       this.prisma.milestone.findMany({
-        where: { project: { pillarId: pillar.id } },
+        where: {
+          project: {
+            pillarId: pillar.id,
+            ...(names ? { OR: anyName(names).map((match) => ({ owner: match })) } : {}),
+          },
+        },
         include: MILESTONE_INCLUDE,
         orderBy: { expectedDate: "asc" },
       }),

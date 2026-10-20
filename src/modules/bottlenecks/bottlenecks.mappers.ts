@@ -10,8 +10,30 @@ function daysBetween(from: Date, to: Date): number {
 
 type BottleneckFull = Bottleneck & { pillar: Pillar; statusHistory: BottleneckStatusHistoryEntry[] };
 
+export interface BottleneckLink {
+  type: "programme" | "project";
+  id: string;
+  name: string;
+}
+
+export async function loadBottleneckLinks(
+  prisma: Pick<PrismaService, "project" | "programme">,
+  linkedRecords: string[],
+): Promise<Map<string, BottleneckLink>> {
+  const ids = [...new Set(linkedRecords.filter((id) => id))];
+  const links = new Map<string, BottleneckLink>();
+  if (ids.length === 0) return links;
+  const [projects, programmes] = await Promise.all([
+    prisma.project.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } }),
+    prisma.programme.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } }),
+  ]);
+  for (const programme of programmes) links.set(programme.id, { type: "programme", id: programme.id, name: programme.name });
+  for (const project of projects) links.set(project.id, { type: "project", id: project.id, name: project.name });
+  return links;
+}
+
 /** Matches bottleneckRecordSchema exactly. `ageDays` is derived from `dateRaised`, never stored. */
-export function toBottleneckRecord(b: BottleneckFull, now: Date) {
+export function toBottleneckRecord(b: BottleneckFull, now: Date, links: Map<string, BottleneckLink> = new Map()) {
   return {
     id: b.id,
     issue: b.issue,
@@ -19,6 +41,7 @@ export function toBottleneckRecord(b: BottleneckFull, now: Date) {
     severity: toKebabCase(b.severity),
     pillar: b.pillar.slug,
     linkedRecord: b.linkedRecord,
+    link: links.get(b.linkedRecord) ?? null,
     institution: b.institution,
     dateRaised: b.dateRaised.toISOString(),
     ageDays: daysBetween(b.dateRaised, now),

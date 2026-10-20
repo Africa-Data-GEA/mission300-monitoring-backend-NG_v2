@@ -88,6 +88,7 @@ export interface ParsedSubmissionRow {
   period: string;
   values: Record<string, string>;
   institutionName?: string;
+  rowNumber: number;
 }
 
 function normalizeLabel(label: string): string {
@@ -112,7 +113,18 @@ type ColumnRole =
   | { kind: "discos" }
   | { kind: "year" }
   | { kind: "monthName" }
+  | { kind: "date" }
   | { kind: "ignored" };
+
+export function monthFromDateCell(raw: unknown): string {
+  if (raw instanceof Date && !Number.isNaN(raw.getTime())) return MONTH_NAMES[raw.getUTCMonth()] ?? "";
+  const text = String(raw ?? "").trim();
+  const named = MONTH_NAMES.find((month) => month.toLowerCase() === text.toLowerCase());
+  if (named) return named;
+  const iso = /^(\d{4})-(\d{2})(?:-\d{2})?/.exec(text);
+  if (iso) return MONTH_NAMES[Number(iso[2]) - 1] ?? "";
+  return "";
+}
 
 function periodFromComponents(frequency: string, year: string, monthName: string): string {
   if (frequency === "Monthly") return `${monthName} ${year}`;
@@ -163,10 +175,8 @@ export async function parseSubmissionFile(
         columnRoles.set(columnNumber, { kind: "monthName" });
         return;
       }
-      // "Date" is decorative/unreliable in the source workbook this
-      // layout mirrors - Year + Month_Name are the trustworthy pair.
       if (normalized === "date") {
-        columnRoles.set(columnNumber, { kind: "ignored" });
+        columnRoles.set(columnNumber, { kind: "date" });
         return;
       }
     } else if (isPeriodHeader(headerText)) {
@@ -187,24 +197,56 @@ export async function parseSubmissionFile(
     let institutionName: string | undefined;
     let year = "";
     let monthName = "";
+    let dateMonth = "";
     const values: Record<string, string> = {};
     for (const [columnNumber, role] of columnRoles) {
-      const raw = dataRow.getCell(columnNumber).value;
-      const text = raw === null || raw === undefined ? "" : String(raw).trim();
+      const cell = dataRow.getCell(columnNumber);
+      const raw = cell.value;
+      let text = raw === null || raw === undefined ? "" : String(raw).trim();
+      if (role.kind === "field") {
+        const field = fields.find((candidate) => candidate.id === role.fieldId);
+        const percent = field && isPercentField(field) ? readPercentCell(raw, cell.numFmt) : null;
+        if (percent !== null) text = percent;
+      }
       if (role.kind === "period") period = text;
       else if (role.kind === "discos") institutionName = text;
       else if (role.kind === "year") year = text;
       else if (role.kind === "monthName") monthName = text;
+      else if (role.kind === "date") dateMonth = monthFromDateCell(raw);
       else if (role.kind === "field") values[role.fieldId] = text;
     }
 
     if (consolidated) {
-      period = year ? periodFromComponents(dataset.frequency, year, monthName) : "";
+      period = year ? periodFromComponents(dataset.frequency, year, monthName || dateMonth) : "";
     }
-    rows.push({ period, values, institutionName });
+    rows.push({ period, values, institutionName, rowNumber });
   }
 
   return rows;
+}
+
+const PERCENT_UNIT = "%";
+
+function isPercentField(field: Pick<DatasetField, "unit">): boolean {
+  return (field.unit ?? "").trim() === PERCENT_UNIT;
+}
+
+export function numberRangeMessage(field: Pick<DatasetField, "label" | "unit">, value: number): string | null {
+  if (isPercentField(field)) {
+    return value < 0 || value > 100 ? `${field.label} must be between 0 and 100, because it is a percentage.` : null;
+  }
+  return value < 0 ? `${field.label} cannot be negative.` : null;
+}
+
+export function readPercentCell(raw: unknown, numFmt: string | undefined): string | null {
+  if (typeof raw === "number" && numFmt && numFmt.includes("%")) {
+    return String(Number((raw * 100).toFixed(10)));
+  }
+  if (typeof raw === "string") {
+    const match = /^\s*(-?\d+(?:\.\d+)?)\s*%\s*$/.exec(raw);
+    if (match) return match[1];
+  }
+  return null;
 }
 
 export interface FieldValidationIssue {
@@ -224,8 +266,14 @@ export function validateFieldValues(
       issues.push({ fieldId: field.id, label: field.label, message: `${field.label} is required.` });
       continue;
     }
-    if (trimmed && field.type === "NUMBER" && Number.isNaN(Number(trimmed))) {
-      issues.push({ fieldId: field.id, label: field.label, message: `${field.label} must be a number.` });
+    if (trimmed && field.type === "NUMBER") {
+      const parsed = Number(trimmed);
+      if (!Number.isFinite(parsed)) {
+        issues.push({ fieldId: field.id, label: field.label, message: `${field.label} must be a number.` });
+      } else {
+        const rangeMessage = numberRangeMessage(field, parsed);
+        if (rangeMessage) issues.push({ fieldId: field.id, label: field.label, message: rangeMessage });
+      }
     }
   }
   return issues;

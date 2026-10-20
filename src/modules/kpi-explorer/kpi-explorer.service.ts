@@ -190,6 +190,10 @@ export class KpiExplorerService {
     const pillar = await this.prisma.pillar.findUnique({ where: { slug: dto.pillar } });
     if (!pillar) throw new BadRequestException("Unknown pillar.");
 
+    if (dto.sourceInstitution.trim() !== kpi.sourceInstitution) {
+      await this.assertRegisteredInstitution(dto.sourceInstitution);
+    }
+
     await this.prisma.$transaction(async (tx) => {
       await tx.kpiDefinition.update({
         where: { id: kpi.id },
@@ -264,6 +268,8 @@ export class KpiExplorerService {
 
     const pillar = await this.prisma.pillar.findUnique({ where: { slug: dto.pillar } });
     if (!pillar) throw new BadRequestException("Unknown pillar.");
+
+    await this.assertRegisteredInstitution(dto.sourceInstitution);
 
     const kpi = await this.prisma.kpiDefinition.create({
       data: {
@@ -454,6 +460,19 @@ export class KpiExplorerService {
     ]);
 
     return this.getProfile(code);
+  }
+
+  private async assertRegisteredInstitution(sourceInstitution: string) {
+    const name = sourceInstitution.trim();
+    const registered = name
+      ? await this.prisma.institution.findFirst({
+          where: { name: { equals: name, mode: "insensitive" } },
+          select: { id: true },
+        })
+      : null;
+    if (!registered) {
+      throw new BadRequestException(`"${name}" is not a registered institution. Select one from the institutions list.`);
+    }
   }
 
   private async resolveInstitutionId(sourceInstitution: string, fallbackInstitutionId: string | null) {

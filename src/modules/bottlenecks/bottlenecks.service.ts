@@ -1,13 +1,13 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import type { AuthenticatedUser } from "@/common/decorators/current-user.decorator";
 import { assertOperationalInstitutionAccess } from "@/common/guards/operational-scope";
 import { resolveBottleneckVisibility } from "@/modules/bottlenecks/bottlenecks-visibility";
-import { projectVisibleTo, resolveReadScope } from "@/modules/programs/programs-visibility";
+import { programmeVisibleTo, projectVisibleTo, resolveReadScope } from "@/modules/programs/programs-visibility";
 import { BottleneckCategory, EscalationStatus, LifecycleStage, RegisterSeverity } from "@prisma/client";
 import { PrismaService } from "@/prisma/prisma.service";
 import { paginate } from "@/modules/administration/overview/overview.mappers";
 import { toKebabCase } from "@/common/utils/enum-casing";
-import { toBottleneckRecord, toEscalationRecord } from "@/modules/bottlenecks/bottlenecks.mappers";
+import { loadBottleneckLinks, toBottleneckRecord, toEscalationRecord } from "@/modules/bottlenecks/bottlenecks.mappers";
 import type { BottlenecksQueryDto } from "@/modules/bottlenecks/dto/bottlenecks-query.dto";
 import type { CreateBottleneckDto } from "@/modules/bottlenecks/dto/create-bottleneck.dto";
 import type { UpdateBottleneckStatusDto } from "@/modules/bottlenecks/dto/update-bottleneck-status.dto";
@@ -45,7 +45,14 @@ export class BottlenecksService {
 
   async getFilters(user: AuthenticatedUser) {
     const visible = await resolveBottleneckVisibility(this.prisma, user);
-    const [pillars, institutions, linkedRecords] = await Promise.all([
+    const scope = await resolveReadScope(this.prisma, user);
+    const registered =
+      scope === null
+        ? await this.prisma.institution.findMany({ select: { name: true }, orderBy: { name: "asc" } })
+        : scope === "none"
+          ? []
+          : [{ name: scope.name }];
+    const [pillars, institutions, linkedRecords, programmes, projects] = await Promise.all([
       this.prisma.pillar.findMany({ orderBy: { name: "asc" } }),
       this.prisma.bottleneck.findMany({ where: visible, select: { institution: true }, distinct: ["institution"] }),
       this.prisma.bottleneck.findMany({
@@ -53,6 +60,8 @@ export class BottlenecksService {
         select: { linkedRecord: true },
         distinct: ["linkedRecord"],
       }),
+      this.prisma.programme.findMany({ where: programmeVisibleTo(scope), select: { id: true, name: true }, orderBy: { name: "asc" } }),
+      this.prisma.project.findMany({ where: projectVisibleTo(scope), select: { id: true, name: true }, orderBy: { name: "asc" } }),
     ]);
 
     const withAll = (label: string, options: { value: string; label: string }[]) => [
@@ -75,6 +84,7 @@ export class BottlenecksService {
           .map((i) => ({ value: i.institution, label: i.institution }))
           .sort((a, b) => a.label.localeCompare(b.label)),
       ),
+      responsibleInstitutions: registered.map((i) => ({ value: i.name, label: i.name })),
       pillars: withAll(
         "pillars",
         pillars.map((p) => ({ value: p.slug, label: p.name })),
@@ -83,6 +93,8 @@ export class BottlenecksService {
         "linked records",
         linkedRecords.map((r) => ({ value: r.linkedRecord, label: r.linkedRecord })),
       ),
+      programmes: programmes.map((p) => ({ value: p.id, label: p.name })),
+      projects: projects.map((p) => ({ value: p.id, label: p.name })),
       lifecycleStages: withAll(
         "stages",
         STAGES.map((s) => ({ value: toKebabCase(s), label: titleCase(toKebabCase(s)) })),
@@ -232,6 +244,10 @@ export class BottlenecksService {
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? DEFAULT_PAGE_SIZE;
     const registerPage = paginate(filtered, page, pageSize);
+    const links = await loadBottleneckLinks(
+      this.prisma,
+      registerPage.items.map((b) => b.linkedRecord),
+    );
 
     const escalationPage = query.escalationPage ?? 1;
     const escalationsPaged = paginate(escalations, escalationPage, DEFAULT_ESCALATION_PAGE_SIZE);
@@ -240,7 +256,7 @@ export class BottlenecksService {
       lastUpdated: now.toISOString(),
       alerts,
       register: {
-        items: registerPage.items.map((b) => toBottleneckRecord(b, now)),
+        items: registerPage.items.map((b) => toBottleneckRecord(b, now, links)),
         page: registerPage.page,
         pageSize: registerPage.pageSize,
         total: registerPage.total,
@@ -284,13 +300,8 @@ export class BottlenecksService {
 
   async create(user: AuthenticatedUser, dto: CreateBottleneckDto) {
     await assertOperationalInstitutionAccess(this.prisma, user, dto.institution);
-    if (dto.linkedRecord) {
-      const project = await this.prisma.project.findUnique({
-        where: { id: dto.linkedRecord.trim() },
-        select: { owner: true },
-      });
-      if (project) await assertOperationalInstitutionAccess(this.prisma, user, project.owner);
-    }
+    const linkedRecord = dto.linkedRecord?.trim() ?? "";
+    if (linkedRecord) await this.assertLinkTarget(user, linkedRecord);
     const pillar = await this.prisma.pillar.findUnique({ where: { slug: dto.pillar } });
     if (!pillar) throw new NotFoundException("Unknown pillar.");
 
@@ -300,7 +311,7 @@ export class BottlenecksService {
         category: dto.category,
         severity: dto.severity,
         pillarId: pillar.id,
-        linkedRecord: dto.linkedRecord?.trim() ?? "",
+        linkedRecord,
         institution: dto.institution.trim(),
         followUp: dto.followUp?.trim() ?? "",
         escalationStatus: "NOT_ESCALATED",
@@ -310,10 +321,27 @@ export class BottlenecksService {
       include: BOTTLENECK_INCLUDE,
     });
 
+    const links = await loadBottleneckLinks(this.prisma, [bottleneck.linkedRecord]);
     return {
-      record: toBottleneckRecord(bottleneck, new Date()),
+      record: toBottleneckRecord(bottleneck, new Date(), links),
       message: `${bottleneck.id} has been added to the bottleneck register.`,
     };
+  }
+
+  private async assertLinkTarget(user: AuthenticatedUser, id: string) {
+    const project = await this.prisma.project.findUnique({ where: { id }, select: { owner: true } });
+    if (project) {
+      await assertOperationalInstitutionAccess(this.prisma, user, project.owner);
+      return;
+    }
+    const scope = await resolveReadScope(this.prisma, user);
+    const programme = await this.prisma.programme.findFirst({
+      where: { id, ...programmeVisibleTo(scope) },
+      select: { id: true },
+    });
+    if (!programme) {
+      throw new BadRequestException("Select a project or programme from the list.");
+    }
   }
 
   async updateStatus(user: AuthenticatedUser, id: string, dto: UpdateBottleneckStatusDto) {
@@ -336,7 +364,8 @@ export class BottlenecksService {
       include: BOTTLENECK_INCLUDE,
     });
 
-    return { record: toBottleneckRecord(bottleneck, new Date()) };
+    const links = await loadBottleneckLinks(this.prisma, [bottleneck.linkedRecord]);
+    return { record: toBottleneckRecord(bottleneck, new Date(), links) };
   }
 
   async delete(id: string) {
@@ -361,9 +390,10 @@ export class BottlenecksService {
       orderBy: { dateRaised: "desc" },
     });
 
+    const links = await loadBottleneckLinks(this.prisma, [projectId]);
     const pageSize = query.pageSize ?? DEFAULT_PAGE_SIZE;
     return paginate(
-      bottlenecks.map((b) => toBottleneckRecord(b, now)),
+      bottlenecks.map((b) => toBottleneckRecord(b, now, links)),
       query.page ?? 1,
       pageSize,
     );

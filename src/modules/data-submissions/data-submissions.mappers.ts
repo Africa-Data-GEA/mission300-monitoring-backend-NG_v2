@@ -16,6 +16,7 @@ import {
   type WorkflowStatus,
 } from "@/modules/data-submissions/workflow-status";
 import { toKebabCase } from "@/common/utils/enum-casing";
+import type { GapState } from "@/modules/data-submissions/data-gap-state";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -66,12 +67,13 @@ type ObligationWithRelations = Obligation & {
 // Mirrors the mock's obligation-status/availableActions transitions
 // (see docs/full-dashboard-backend-logic-audit.md's Data Submissions
 // section and data-submissions.mappers research): no submission yet ->
-// enter/upload/download; returned -> upload/download again (resubmit);
-// anything else in flight -> view only. A fulfilled obligation
+// enter/upload/download; returned or rejected -> enter/upload/download again
+// (the obligation is still outstanding, so the provider must be able to
+// correct and resubmit); anything else in flight -> view only. A fulfilled obligation
 // (acceptedSubmissionId set) never reaches this function - see
 // getObligations()'s query, which excludes those entirely.
 const ACTIONS_UNSTARTED = ["enter-data", "upload-template", "download-template"];
-const ACTIONS_RETURNED = ["upload-template", "download-template"];
+const RESUBMITTABLE_STATUSES = ["RETURNED", "REJECTED"];
 const ACTIONS_IN_FLIGHT = ["view"];
 
 /** Matches obligationSchema exactly (m300-frontend/src/api/schemas/data-submissions/obligations.ts). */
@@ -82,9 +84,9 @@ export function toObligationView(obligation: ObligationWithRelations, latestSubm
   if (!latestSubmission) {
     status = workflowStatus(obligation.dueDate.getTime() < Date.now() ? "overdue" : "due");
     availableActions = ACTIONS_UNSTARTED;
-  } else if (latestSubmission.status === "RETURNED") {
+  } else if (RESUBMITTABLE_STATUSES.includes(latestSubmission.status)) {
     status = submissionWorkflowStatus(latestSubmission.status);
-    availableActions = ACTIONS_RETURNED;
+    availableActions = ACTIONS_UNSTARTED;
   } else {
     status = submissionWorkflowStatus(latestSubmission.status);
     availableActions = ACTIONS_IN_FLIGHT;
@@ -99,7 +101,7 @@ export function toObligationView(obligation: ObligationWithRelations, latestSubm
     reportingPeriod: obligation.reportingPeriod,
     frequency: obligation.dataset.frequency,
     dueDate: obligation.dueDate.toISOString(),
-    dueLabel: formatDueLabel(obligation.dueDate),
+    dueLabel: status.code === "provisional" ? "Submitted" : formatDueLabel(obligation.dueDate),
     status,
     template: buildTemplate(obligation.dataset),
     acceptedSubmissionId: obligation.acceptedSubmissionId,
@@ -114,7 +116,34 @@ type SubmissionWithRelations = Submission & {
   institution: Institution;
   submittedBy: User;
   obligation: (Obligation & { dataset: Dataset }) | null;
+  reviewDecisions?: (ReviewDecision & { reviewedBy?: User })[];
 };
+
+const DECISION_LABEL_PAST: Record<string, string> = {
+  APPROVE: "Approved",
+  PROVISIONALLY_APPROVE: "Provisionally approved",
+  RETURN_FOR_CORRECTION: "Returned",
+  REJECT: "Rejected",
+};
+
+function formatDecisionDate(date: Date): string {
+  return date.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+}
+
+export function reviewSummary(status: string, decisions: Pick<ReviewDecision, "decision" | "createdAt">[]): string {
+  const ordered = [...decisions].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+  const latest = ordered.at(-1);
+  const provisional = ordered.find((entry) => entry.decision === "PROVISIONALLY_APPROVE");
+
+  if (status === "PROVISIONALLY_APPROVED") return "Provisional — awaiting confirmation.";
+  if (!latest) return status === "PENDING" ? "Awaiting review." : "No review decision recorded.";
+  if (status === "APPROVED" && provisional) {
+    return `Confirmed after provisional approval on ${formatDecisionDate(provisional.createdAt)}.`;
+  }
+  const label = DECISION_LABEL_PAST[latest.decision] ?? "Decided";
+  const withdrawn = provisional && latest.decision !== "PROVISIONALLY_APPROVE" ? " Provisional approval withdrawn." : "";
+  return `${label} on ${formatDecisionDate(latest.createdAt)}.${withdrawn}`;
+}
 
 /**
  * Matches SubmissionListItem exactly (m300-frontend/src/api/schemas/data-
@@ -123,10 +152,14 @@ type SubmissionWithRelations = Submission & {
  * violation, not just an odd display value, so every fallback here must
  * be non-empty text, never "".
  */
-export function toSubmissionListItem(submission: SubmissionWithRelations) {
+export function toSubmissionListItem(submission: SubmissionWithRelations, latestForObligation = false) {
   const submitted = submission.status !== "DRAFT";
+  const inReview = submission.status === "PENDING" || submission.status === "UNDER_REVIEW";
+  const canCorrect =
+    latestForObligation && RESUBMITTABLE_STATUSES.includes(submission.status) && !submission.obligation?.acceptedSubmissionId;
   return {
     id: submission.id,
+    obligationId: submission.obligationId,
     institution: submission.institution.name,
     dataset: submission.obligation?.dataset.name ?? "Unlinked submission",
     reportingPeriod: submission.obligation?.reportingPeriod ?? "Unknown period",
@@ -137,13 +170,16 @@ export function toSubmissionListItem(submission: SubmissionWithRelations) {
     submittedAt: submitted ? submission.createdAt.toISOString() : null,
     submittedAtLabel: submitted ? formatAgeLabel(submission.createdAt) : "Not yet submitted",
     status: submissionWorkflowStatus(submission.status),
-    // Real validation-issue tracking is Phase 3 (validation queue/detail) -
-    // honest placeholder text rather than a number this endpoint can't
-    // actually back yet, but never "" (the schema requires min 1 char).
-    validationSummary: "No validation issues recorded yet.",
-    availableActions:
-      submission.status === "PENDING" || submission.status === "UNDER_REVIEW" ? ["review"] : ["view"],
+    validationSummary: reviewSummary(submission.status, submission.reviewDecisions ?? []),
+    availableActions: inReview ? ["review"] : canCorrect ? ["view", "correct"] : ["view"],
   };
+}
+
+export function permittedDecisionsFor(status: string, canDecide: boolean) {
+  if (!canDecide) return [];
+  if (status === "PENDING") return ["approved", "provisional", "returned", "rejected"] as const;
+  if (status === "PROVISIONALLY_APPROVED") return ["approved", "returned", "rejected"] as const;
+  return [];
 }
 
 export function formatAgeLabel(date: Date): string {
@@ -170,31 +206,29 @@ export function toOverdueItem(obligation: ObligationWithRelations) {
   };
 }
 
-type KpiWithPillar = KpiDefinition & { pillar: Pillar };
+type KpiWithPillar = KpiDefinition & {
+  pillar: Pillar;
+  sourceInstitutions: { institution: Institution }[];
+  datasetFields: { dataset: Pick<Dataset, "id" | "name"> }[];
+};
 
-/**
- * Matches dataGapSchema's shape (m300-frontend/src/api/schemas/data-
- * submissions/compliance.ts). Deliberately the simplest defensible
- * definition given what's actually computable today: a KPI that has never
- * had an approved value published for it at all (no KpiValue row exists).
- * category/readinessTier/owner have no real backing data source yet in
- * this schema - placeholder text rather than inventing a fake taxonomy;
- * revisit once KPI Explorer's real shape (a separate module) exists.
- */
-export function toDataGap(kpi: KpiWithPillar) {
+const READINESS_LABEL: Record<string, string> = { CORE: "Core", SUPPORTING: "Supporting", FUTURE: "Future" };
+
+export function toDataGap(kpi: KpiWithPillar, state: GapState) {
+  const owners = kpi.sourceInstitutions.map((link) => link.institution.name).join(", ");
   return {
     id: `gap-${kpi.id}`,
-    kpiId: kpi.id,
+    kpiId: kpi.code,
     kpiName: kpi.name,
     pillar: kpi.pillar.name,
-    institution: "Not supplied",
-    reportingPeriod: "Not supplied",
-    category: "No data ever received",
-    readinessTier: "Not assessed",
-    owner: "Unassigned",
-    nextAction: "Assign a reporting obligation for this indicator.",
-    status: null,
-    availableActions: [] as string[],
+    institution: owners || "Not supplied",
+    reportingPeriod: kpi.frequency || "Not supplied",
+    category: state.category,
+    readinessTier: READINESS_LABEL[kpi.readiness] ?? "Not assessed",
+    owner: owners || "Unassigned",
+    nextAction: state.nextAction,
+    status: state.statusCode ? workflowStatus(state.statusCode) : null,
+    availableActions: ["view"] as string[],
   };
 }
 
@@ -218,7 +252,11 @@ function toEntryField(field: DatasetField) {
 }
 
 /** Matches manualEntryDefinitionSchema exactly - the server-driven form definition behind GET .../obligations/:id/entry. */
-export function toManualEntryDefinition(obligation: ObligationWithDatasetFields) {
+export function toManualEntryDefinition(
+  obligation: ObligationWithDatasetFields,
+  extras: { periods: string[]; institutions: string[] } = { periods: [], institutions: [] },
+) {
+  const consolidated = obligation.dataset.submissionMode === "NERC_CONSOLIDATED";
   const sections = new Map<
     string,
     { id: string; title: string; description: string; fields: ReturnType<typeof toEntryField>[] }
@@ -241,6 +279,10 @@ export function toManualEntryDefinition(obligation: ObligationWithDatasetFields)
     institution: obligation.institution.name,
     dataset: obligation.dataset.name,
     reportingPeriod: obligation.reportingPeriod,
+    frequency: obligation.dataset.frequency,
+    consolidated,
+    periods: consolidated ? [] : extras.periods,
+    institutions: consolidated ? extras.institutions : [],
     sections: [...sections.values()],
   };
 }
@@ -297,7 +339,7 @@ export function toValidationQueueItem(submission: SubmissionWithQueueRelations) 
   };
 }
 
-type SubmissionWithDetailRelations = SubmissionWithQueueRelations & {
+type SubmissionWithDetailRelations = Omit<SubmissionWithQueueRelations, "reviewDecisions"> & {
   items: (SubmissionItem & { kpiDefinition: KpiDefinition })[];
   reviewDecisions: (ReviewDecision & { reviewedBy: User })[];
 };
@@ -320,10 +362,7 @@ export function toSubmissionDetail(
     actor: submission.submittedBy.fullName,
     occurredAt: submission.createdAt.toISOString(),
     occurredAtLabel: formatAgeLabel(submission.createdAt),
-    comment:
-      submission.method === "UPLOAD"
-        ? "Template uploaded and backend validation completed."
-        : "Entry submitted and backend validation completed.",
+    comment: `${submission.method === "UPLOAD" ? "Template uploaded" : "Entry submitted"}: ${submission.items.length} value${submission.items.length === 1 ? "" : "s"} read and checked for format and range. These checks do not replace the reviewer's decision.`,
   };
   const decisionEntries = submission.reviewDecisions
     .slice()
@@ -351,10 +390,7 @@ export function toSubmissionDetail(
     notes: submission.notes ?? "",
     issues: [] as unknown[],
     history: [createdEntry, ...decisionEntries],
-    permittedDecisions:
-      submission.status === "PENDING" && context.canDecide
-        ? (["approved", "provisional", "returned", "rejected"] as const)
-        : [],
+    permittedDecisions: permittedDecisionsFor(submission.status, context.canDecide),
     extractedValues,
   };
 }

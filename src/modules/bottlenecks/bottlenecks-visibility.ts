@@ -1,10 +1,10 @@
 import type { Prisma } from "@prisma/client";
 import type { AuthenticatedUser } from "@/common/decorators/current-user.decorator";
 import { ownerMatchesInstitution } from "@/common/institutions/owner-match";
-import { projectVisibleTo, resolveReadScope } from "@/modules/programs/programs-visibility";
+import { programmeVisibleTo, projectVisibleTo, resolveReadScope } from "@/modules/programs/programs-visibility";
 import type { PrismaService } from "@/prisma/prisma.service";
 
-type BottleneckReadDb = Pick<PrismaService, "institution" | "project" | "bottleneck">;
+type BottleneckReadDb = Pick<PrismaService, "institution" | "project" | "programme" | "bottleneck">;
 
 export async function resolveBottleneckVisibility(
   prisma: BottleneckReadDb,
@@ -14,9 +14,10 @@ export async function resolveBottleneckVisibility(
   if (scope === null) return {};
   if (scope === "none") return { id: { in: [] } };
 
-  const [recorded, projects] = await Promise.all([
+  const [recorded, projects, programmes] = await Promise.all([
     prisma.bottleneck.findMany({ select: { institution: true }, distinct: ["institution"] }),
     prisma.project.findMany({ where: projectVisibleTo(scope), select: { id: true } }),
+    prisma.programme.findMany({ where: programmeVisibleTo(scope), select: { id: true } }),
   ]);
 
   const institutionNames = [
@@ -31,7 +32,7 @@ export async function resolveBottleneckVisibility(
       ...[...new Set(institutionNames)].map((name) => ({
         institution: { equals: name.trim(), mode: "insensitive" as const },
       })),
-      { linkedRecord: { in: projects.map((project) => project.id) } },
+      { linkedRecord: { in: [...projects, ...programmes].map((record) => record.id) } },
     ],
   };
 }

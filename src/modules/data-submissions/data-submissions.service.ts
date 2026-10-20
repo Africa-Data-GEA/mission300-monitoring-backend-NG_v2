@@ -1,12 +1,37 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
-import type { ReviewDecisionType, SubmissionStatus } from "@prisma/client";
+import { gapStateFor } from "@/modules/data-submissions/data-gap-state";
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
+import type { Prisma, ReviewDecisionType, SubmissionStatus } from "@prisma/client";
 import { PrismaService } from "@/prisma/prisma.service";
 import { StorageService } from "@/storage/storage.service";
 import { RabbitmqService } from "@/events/rabbitmq.service";
 import { SecuritySettingsService } from "@/modules/administration/security/security-settings.service";
-import { scopeInstitutionFilter, assertInstitutionMembership } from "@/common/guards/institution-scope.guard";
+import {
+  scopeInstitutionFilter,
+  scopeSubmissionFilter,
+  assertInstitutionMembership,
+  assertSubmissionAccess,
+} from "@/common/guards/institution-scope.guard";
 import { paginate } from "@/modules/administration/overview/overview.mappers";
 import { workflowStatus } from "@/modules/data-submissions/workflow-status";
+import { quartersTouched, rollupNationalKpis, type RollupOutcome } from "@/modules/data-submissions/national-rollup.db";
+import { publishItemValue, withdrawItemValues } from "@/modules/data-submissions/published-values";
+import {
+  alreadyWaitingMessage,
+  heldBackNote,
+  isSingleDiscoValueForNationalKpi,
+  nextUrlAfterSubmit,
+  receivedMessage,
+  rollupNote,
+  rowProblemsMessage,
+  toProblemDetails,
+  type RowProblem,
+} from "@/modules/data-submissions/submit-flow";
 import type { AuthenticatedUser } from "@/common/decorators/current-user.decorator";
 import type { DataSubmissionsQueryDto } from "@/modules/data-submissions/dto/data-submissions-query.dto";
 import type { ManualEntryDto } from "@/modules/data-submissions/dto/manual-entry.dto";
@@ -28,7 +53,7 @@ import {
   parseSubmissionFile,
   validateFieldValues,
 } from "@/modules/data-submissions/dataset-template";
-import { resolveDiscoName } from "@/modules/data-submissions/disco-institutions";
+import { DISCO_CANONICAL_NAMES, resolveDiscoName } from "@/modules/data-submissions/disco-institutions";
 
 const DEFAULT_PAGE_SIZE = 20;
 
@@ -43,6 +68,7 @@ const SUBMISSION_INCLUDE = {
   submittedBy: true,
   obligation: { include: { dataset: true } },
   reviewer: true,
+  reviewDecisions: true,
 } as const;
 const SUBMISSION_DETAIL_INCLUDE = {
   institution: true,
@@ -73,6 +99,9 @@ const DECISION_TO_STATUS: Record<string, SubmissionStatus> = {
   rejected: "REJECTED",
 };
 const VALUE_PUBLISHING_DECISIONS = new Set(["approved", "provisional"]);
+const WITHDRAWING_DECISIONS = new Set(["returned", "rejected"]);
+const OPEN_FOR_DECISION: SubmissionStatus[] = ["PENDING", "PROVISIONALLY_APPROVED"];
+const BLOCKING_STATUSES = OPEN_FOR_DECISION;
 
 @Injectable()
 export class DataSubmissionsService {
@@ -83,10 +112,14 @@ export class DataSubmissionsService {
     private readonly securitySettings: SecuritySettingsService,
   ) {}
 
-  async getFilters() {
+  async getFilters(user: AuthenticatedUser) {
+    const ownInstitution = scopeInstitutionFilter(user).institutionId;
     const [institutions, datasets, obligationPeriods, reviewerUsers] = await Promise.all([
-      this.prisma.institution.findMany({ orderBy: { name: "asc" } }),
-      this.prisma.dataset.findMany({ orderBy: { name: "asc" } }),
+      this.prisma.institution.findMany({ where: ownInstitution ? { id: ownInstitution } : {}, orderBy: { name: "asc" } }),
+      this.prisma.dataset.findMany({
+        where: ownInstitution ? { ownerInstitutionId: ownInstitution } : {},
+        orderBy: { name: "asc" },
+      }),
       this.prisma.obligation.findMany({ select: { reportingPeriod: true }, distinct: ["reportingPeriod"] }),
       this.prisma.user.findMany({
         where: {
@@ -138,7 +171,11 @@ export class DataSubmissionsService {
         "reviewers",
         reviewerUsers.map((reviewer) => ({ value: reviewer.id, label: reviewer.fullName })),
       ),
-      readinessTiers: withAll("tiers", []),
+      readinessTiers: withAll("tiers", [
+        { value: "core", label: "Core" },
+        { value: "supporting", label: "Supporting" },
+        { value: "future", label: "Future" },
+      ]),
       overdueStatuses: withAll("statuses", [
         { value: "overdue", label: "Overdue" },
         { value: "due-soon", label: "Due soon" },
@@ -205,7 +242,7 @@ export class DataSubmissionsService {
     // own comment on this exact behavior.
     const obligations = await this.prisma.obligation.findMany({
       where: {
-        acceptedSubmissionId: null,
+        OR: [{ acceptedSubmissionId: null }, { acceptedSubmission: { status: "PROVISIONALLY_APPROVED" } }],
         // scopeInstitutionFilter(user) MUST be spread last: for an
         // institution-scoped user it always sets institutionId, and object
         // spread lets a later key win - putting it after the client-supplied
@@ -262,16 +299,23 @@ export class DataSubmissionsService {
         // excluded from this operational view rather than rendering as
         // "Unlinked submission / Unknown period" noise.
         obligationId: { not: null },
-        // scopeInstitutionFilter(user) last - see comment in getObligations().
         ...(query.institution && query.institution !== "all" ? { institutionId: query.institution } : {}),
-        ...scopeInstitutionFilter(user),
+        ...scopeSubmissionFilter(user),
       },
       include: SUBMISSION_INCLUDE,
       orderBy: { createdAt: "desc" },
     });
 
+    const latestIds = new Set<string>();
+    const seenObligations = new Set<string>();
+    for (const submission of submissions) {
+      if (!submission.obligationId || seenObligations.has(submission.obligationId)) continue;
+      seenObligations.add(submission.obligationId);
+      latestIds.add(submission.id);
+    }
+
     const views = submissions
-      .map(toSubmissionListItem)
+      .map((submission) => toSubmissionListItem(submission, latestIds.has(submission.id)))
       .filter((view) => !search || [view.institution, view.dataset].join(" ").toLowerCase().includes(search));
 
     return paginate(views, query.page ?? 1, pageSize);
@@ -296,29 +340,86 @@ export class DataSubmissionsService {
     return paginate(views, query.page ?? 1, pageSize);
   }
 
-  /**
-   * Simplest defensible definition given what's actually computable today
-   * (see toDataGap()'s comment): a KPI that has never had a single
-   * approved value published for it. dataGapListSchema in the real
-   * contract IS the paginated envelope (verified directly against
-   * m300-frontend/src/api/schemas/data-submissions/compliance.ts - it
-   * wraps pageOf(dataGapSchema) in a z.preprocess, easy to misread as a
-   * plain array from the shape alone), not a bare array.
-   */
-  async getGaps(query: DataSubmissionsQueryDto) {
+  async getGaps(user: AuthenticatedUser, query: DataSubmissionsQueryDto) {
     const pageSize = Math.min(100, query.pageSize ?? DEFAULT_PAGE_SIZE);
+    const search = query.search?.trim();
+    const scoped = scopeInstitutionFilter(user).institutionId;
+    const institutionId = scoped ?? (query.institution && query.institution !== "all" ? query.institution : undefined);
+    const readiness = query.readinessTier?.toUpperCase();
+
     const kpis = await this.prisma.kpiDefinition.findMany({
-      where: { isActive: true, values: { none: {} } },
-      include: { pillar: true },
+      where: {
+        isActive: true,
+        values: { none: {} },
+        ...(institutionId ? { sourceInstitutions: { some: { institutionId } } } : {}),
+        ...(readiness && ["CORE", "SUPPORTING", "FUTURE"].includes(readiness)
+          ? { readiness: readiness as "CORE" | "SUPPORTING" | "FUTURE" }
+          : {}),
+        ...(search
+          ? {
+              OR: [
+                { name: { contains: search, mode: "insensitive" } },
+                { code: { contains: search, mode: "insensitive" } },
+                { sourceInstitutions: { some: { institution: { name: { contains: search, mode: "insensitive" } } } } },
+              ],
+            }
+          : {}),
+      },
+      include: {
+        pillar: true,
+        sourceInstitutions: { include: { institution: true } },
+        datasetFields: { include: { dataset: true } },
+      },
       orderBy: { name: "asc" },
     });
-    return paginate(kpis.map(toDataGap), query.page ?? 1, pageSize);
+
+    const datasetIds = [...new Set(kpis.flatMap((kpi) => kpi.datasetFields.map((field) => field.datasetId)))];
+    const [obligations, submissions] = datasetIds.length
+      ? await Promise.all([
+          this.prisma.obligation.findMany({
+            where: { datasetId: { in: datasetIds }, ...scopeInstitutionFilter(user) },
+            select: { id: true, datasetId: true, dueDate: true, acceptedSubmissionId: true },
+          }),
+          this.prisma.submission.findMany({
+            where: { obligation: { datasetId: { in: datasetIds } }, ...scopeInstitutionFilter(user) },
+            select: { obligationId: true, status: true, createdAt: true, obligation: { select: { datasetId: true } } },
+          }),
+        ])
+      : [[], []];
+
+    const now = new Date();
+    const views = kpis.map((kpi) => {
+      const ids = new Set(kpi.datasetFields.map((field) => field.datasetId));
+      const state = gapStateFor(
+        kpi.datasetFields[0]?.dataset.name ?? null,
+        obligations.filter((obligation) => ids.has(obligation.datasetId)),
+        submissions.filter((submission) => submission.obligation && ids.has(submission.obligation.datasetId)),
+        now,
+      );
+      return toDataGap(kpi, state);
+    });
+    return paginate(views, query.page ?? 1, pageSize);
   }
 
   async getManualEntryDefinition(user: AuthenticatedUser, obligationId: string) {
     const obligation = await this.findObligationWithFields(obligationId);
     assertInstitutionMembership(user, obligation.institutionId);
-    return toManualEntryDefinition(obligation);
+    const consolidated = obligation.dataset.submissionMode === "NERC_CONSOLIDATED";
+    const open = consolidated
+      ? []
+      : await this.prisma.obligation.findMany({
+          where: {
+            institutionId: obligation.institutionId,
+            datasetId: obligation.dataset.id,
+            acceptedSubmissionId: null,
+          },
+          select: { reportingPeriod: true, dueDate: true },
+          orderBy: { dueDate: "asc" },
+        });
+    return toManualEntryDefinition(obligation, {
+      periods: open.map((entry) => entry.reportingPeriod),
+      institutions: consolidated ? [...DISCO_CANONICAL_NAMES] : [],
+    });
   }
 
   async getUploadDefinition(user: AuthenticatedUser, obligationId: string) {
@@ -331,40 +432,26 @@ export class DataSubmissionsService {
     const obligation = await this.findObligationWithFields(obligationId);
     assertInstitutionMembership(user, obligation.institutionId);
 
-    const issues = validateFieldValues(obligation.dataset.fields, dto.values);
-    if (issues.length > 0) {
-      throw new BadRequestException(
-        `This entry has ${issues.length} problem${issues.length === 1 ? "" : "s"}: ` +
-          issues.map((issue) => issue.message).join(" "),
-      );
-    }
+    const entered = dto.rows?.length
+      ? dto.rows
+      : dto.values
+        ? [{ period: obligation.reportingPeriod, values: dto.values }]
+        : [];
+    if (entered.length === 0) throw new BadRequestException("Enter at least one row of values.");
+    if (entered.length > 500) throw new BadRequestException("Enter no more than 500 rows at a time.");
 
-    const items = buildSubmissionItems(obligation.dataset.fields, dto.values, obligation.reportingPeriod);
-    const reviewerId = await this.pickReviewer(user.id, obligation.institutionId);
+    const rows = entered.map((row, index) => ({
+      period: row.period?.trim() || obligation.reportingPeriod,
+      values: row.values,
+      institutionName: row.institution?.trim() || undefined,
+      rowNumber: index + 1,
+    }));
 
-    const submission = await this.prisma.submission.create({
-      data: {
-        institutionId: obligation.institutionId,
-        submittedById: user.id,
-        method: "MANUAL_ENTRY",
-        status: "PENDING",
-        obligationId: obligation.id,
-        sourceReference: dto.sourceReference ?? "",
-        notes: dto.notes ?? "",
-        reviewerId,
-        items: { create: items },
-      },
+    return this.submitRows(user, obligation, rows, {
+      method: "MANUAL_ENTRY",
+      sourceReference: dto.sourceReference ?? "",
+      notes: dto.notes,
     });
-
-    await this.rabbitmq.publish("submission.uploaded", { submissionId: submission.id });
-
-    return {
-      submissionId: submission.id,
-      version: submission.version,
-      status: workflowStatus("pending-review"),
-      message: "Entry submitted. Backend validation passed and the submission is ready for review.",
-      nextUrl: `/data-submissions/validation/${submission.id}`,
-    };
   }
 
   /**
@@ -388,7 +475,7 @@ export class DataSubmissionsService {
     const sourceReference = dto.sourceReference?.trim();
     if (!sourceReference) throw new BadRequestException("Provide the source reference for this submission.");
 
-    let rows: { period: string; values: Record<string, string>; institutionName?: string }[];
+    let rows: { period: string; values: Record<string, string>; institutionName?: string; rowNumber: number }[];
     try {
       rows = await parseSubmissionFile(
         file.buffer,
@@ -403,14 +490,46 @@ export class DataSubmissionsService {
       throw new BadRequestException("The uploaded file has no data rows to submit.");
     }
 
+    return this.submitRows(user, obligation, rows, {
+      method: "UPLOAD",
+      sourceReference,
+      notes: dto.notes,
+      storeFile: () => this.storage.save("submissions", file),
+    });
+  }
+
+  private async submitRows(
+    user: AuthenticatedUser,
+    obligation: Awaited<ReturnType<DataSubmissionsService["findObligationWithFields"]>>,
+    rows: { period: string; values: Record<string, string>; institutionName?: string; rowNumber: number }[],
+    options: {
+      method: "UPLOAD" | "MANUAL_ENTRY";
+      sourceReference: string;
+      notes?: string;
+      storeFile?: () => Promise<{ key: string; originalName: string }>;
+    },
+  ) {
     const consolidated = obligation.dataset.submissionMode === "NERC_CONSOLIDATED";
     const resolved: {
       period: string;
       values: Record<string, string>;
+      rowNumber: number;
       obligationId: string;
       institutionId: string;
     }[] = [];
-    const unmatchedPeriods: string[] = [];
+    const problems: RowProblem[] = [];
+    const checkValues = (row: { rowNumber: number; period: string; values: Record<string, string> }) => {
+      for (const issue of validateFieldValues(obligation.dataset.fields, row.values)) {
+        problems.push({
+          rowNumber: row.rowNumber,
+          period: row.period,
+          field: issue.label,
+          value: row.values[issue.fieldId] ?? null,
+          message: issue.message,
+          text: `Row ${row.rowNumber} (${row.period || "no period"}): ${issue.message}`,
+        });
+      }
+    };
 
     if (consolidated) {
       const unresolvedNames = new Set<string>();
@@ -458,7 +577,15 @@ export class DataSubmissionsService {
     } else {
       for (const row of rows) {
         if (!row.period) {
-          throw new BadRequestException("Every row must have a Period value.");
+          problems.push({
+            rowNumber: row.rowNumber,
+            period: "",
+            field: "Period",
+            value: null,
+            message: "The Period is blank.",
+            text: `Row ${row.rowNumber}: the Period is blank.`,
+          });
+          continue;
         }
         if (row.period === obligation.reportingPeriod) {
           resolved.push({ ...row, obligationId: obligation.id, institutionId: obligation.institutionId });
@@ -474,72 +601,68 @@ export class DataSubmissionsService {
           },
         });
         if (!matching) {
-          unmatchedPeriods.push(row.period);
+          problems.push({
+            rowNumber: row.rowNumber,
+            period: row.period,
+            field: "Period",
+            value: row.period,
+            message: "There is no reporting obligation for this period, so the row cannot be submitted.",
+            text: `Row ${row.rowNumber} (${row.period}): there is no reporting obligation for this period, so the row cannot be submitted.`,
+          });
           continue;
         }
         resolved.push({ ...row, obligationId: matching.id, institutionId: matching.institutionId });
       }
     }
 
-    if (resolved.length === 0) {
-      throw new BadRequestException(
-        `No row matched a known reporting obligation for this institution and dataset. Periods in the file: ${unmatchedPeriods.join(", ")}.`,
-      );
+    for (const row of resolved) checkValues(row);
+
+    if (problems.length > 0) {
+      problems.sort((a, b) => a.rowNumber - b.rowNumber);
+      throw new BadRequestException({
+        message: rowProblemsMessage(
+          problems.map((problem) => problem.text),
+          options.method === "MANUAL_ENTRY" ? "submit it again" : "upload it again",
+        ),
+        problems: toProblemDetails(problems),
+      });
     }
 
-    for (const row of resolved) {
-      const issues = validateFieldValues(obligation.dataset.fields, row.values);
-      if (issues.length > 0) {
-        throw new BadRequestException(
-          `Row for ${row.period} has ${issues.length} problem${issues.length === 1 ? "" : "s"}: ` +
-            issues.map((issue) => issue.message).join(" "),
-        );
-      }
-    }
+    await this.assertNothingWaiting(resolved.map((row) => ({ obligationId: row.obligationId, period: row.period })));
 
-    const stored = await this.storage.save("submissions", file);
+    const stored = options.storeFile ? await options.storeFile() : null;
 
     const created: { submissionId: string; version: number }[] = [];
+    let totalValues = 0;
     for (const row of resolved) {
-      const reviewerId = await this.pickReviewer(user.id, row.institutionId);
+      const reviewerId = await this.pickReviewer(user.id, consolidated ? (user.institutionId ?? row.institutionId) : row.institutionId);
       const items = buildSubmissionItems(obligation.dataset.fields, row.values, row.period);
-      const submission = await this.prisma.submission.create({
-        data: {
-          institutionId: row.institutionId,
-          submittedById: user.id,
-          method: "UPLOAD",
-          status: "PENDING",
-          obligationId: row.obligationId,
-          sourceReference,
-          notes: dto.notes ?? "",
-          sourceFileUrl: stored.key,
-          originalFileName: stored.originalName,
-          reviewerId,
-          items: { create: items },
-        },
+      const submission = await this.createIfNothingWaiting(row.obligationId, row.period, {
+        institutionId: row.institutionId,
+        submittedById: user.id,
+        method: options.method,
+        status: "PENDING",
+        obligationId: row.obligationId,
+        sourceReference: options.sourceReference,
+        notes: options.notes ?? "",
+        sourceFileUrl: stored?.key,
+        originalFileName: stored?.originalName,
+        reviewerId,
+        items: { create: items },
       });
       await this.rabbitmq.publish("submission.uploaded", { submissionId: submission.id });
       created.push({ submissionId: submission.id, version: submission.version });
+      totalValues += items.length;
     }
 
     const primary = created.find((entry) => entry.submissionId) ?? created[0];
-    const skippedNote =
-      unmatchedPeriods.length > 0
-        ? ` ${unmatchedPeriods.length} row(s) were skipped (no matching obligation for: ${unmatchedPeriods.join(", ")}).`
-        : "";
 
     return {
       submissionId: primary.submissionId,
       version: primary.version,
       status: workflowStatus("pending-review"),
-      message:
-        created.length === 1
-          ? "Upload received. Backend validation passed and the submission is ready for review."
-          : `Upload received. ${created.length} submissions were created from this file and are ready for review.${skippedNote}`,
-      nextUrl:
-        created.length === 1
-          ? `/data-submissions/validation/${primary.submissionId}`
-          : "/data-submissions/validation",
+      message: receivedMessage(rows.length, totalValues, created.length),
+      nextUrl: nextUrlAfterSubmit(user, created.length === 1 ? primary.submissionId : null),
     };
   }
 
@@ -558,11 +681,11 @@ export class DataSubmissionsService {
 
     const submissions = await this.prisma.submission.findMany({
       where: {
-        status: "PENDING",
+        status: { in: OPEN_FOR_DECISION },
         // scopeInstitutionFilter(user) last - see comment in getObligations().
         ...(query.institution && query.institution !== "all" ? { institutionId: query.institution } : {}),
         ...(query.reviewer && query.reviewer !== "all" ? { reviewerId: query.reviewer } : {}),
-        ...scopeInstitutionFilter(user),
+        ...scopeSubmissionFilter(user),
       },
       include: SUBMISSION_INCLUDE,
       orderBy: { createdAt: "asc" }, // oldest-waiting first
@@ -580,7 +703,7 @@ export class DataSubmissionsService {
 
   async getSubmissionDetail(user: AuthenticatedUser, id: string) {
     const submission = await this.prisma.submission.findUnique({
-      where: { id, ...scopeInstitutionFilter(user) },
+      where: { id, ...scopeSubmissionFilter(user) },
       include: SUBMISSION_DETAIL_INCLUDE,
     });
     if (!submission) throw new NotFoundException("Submission not found.");
@@ -606,29 +729,60 @@ export class DataSubmissionsService {
    */
   async recordDecision(user: AuthenticatedUser, id: string, dto: RecordValidationDecisionDto) {
     const submission = await this.prisma.submission.findUnique({
-      where: { id, ...scopeInstitutionFilter(user) },
-      include: { items: { include: { kpiDefinition: true } } },
+      where: { id, ...scopeSubmissionFilter(user) },
+      include: {
+        items: { include: { kpiDefinition: true } },
+        institution: true,
+        submittedBy: { include: { institution: true } },
+        obligation: { include: { dataset: true } },
+      },
     });
     if (!submission) throw new NotFoundException("Submission not found.");
-    assertInstitutionMembership(user, submission.institutionId);
+    assertSubmissionAccess(user, submission);
     if (submission.submittedById === user.id && !(await this.securitySettings.get()).allowSelfReview) {
       throw new ForbiddenException("Self-review is disabled by the system administrator.");
     }
-    if (submission.status !== "PENDING") {
+    if (!OPEN_FOR_DECISION.includes(submission.status)) {
       throw new BadRequestException("This submission is not awaiting a decision.");
     }
+    const wasProvisional = submission.status === "PROVISIONALLY_APPROVED";
+    if (wasProvisional && dto.decision === "provisional") {
+      throw new BadRequestException(
+        "This submission is already provisionally approved. Confirm it as approved, or return or reject it.",
+      );
+    }
+    const withdrawsValue = wasProvisional && WITHDRAWING_DECISIONS.has(dto.decision);
 
     const reviewType = DECISION_TO_REVIEW_TYPE[dto.decision];
     const targetStatus = DECISION_TO_STATUS[dto.decision];
     const publishesValue = VALUE_PUBLISHING_DECISIONS.has(dto.decision);
+    const consolidated = submission.obligation?.dataset.submissionMode === "NERC_CONSOLIDATED";
+    const submitterType = submission.submittedBy.institution?.type ?? "";
+    const heldBack = new Set(
+      submission.items
+        .filter(
+          (item) => consolidated || isSingleDiscoValueForNationalKpi(submitterType, item.kpiDefinition.aggregation),
+        )
+        .map((item) => item.id),
+    );
+    let rollup: RollupOutcome | null = null;
 
     await this.prisma.$transaction(async (tx) => {
       const { count } = await tx.submission.updateMany({
-        where: { id, status: "PENDING", ...scopeInstitutionFilter(user) },
+        where: { id, status: submission.status, ...scopeSubmissionFilter(user) },
         data: { status: targetStatus },
       });
       if (count !== 1) {
         throw new BadRequestException("This submission was already decided.");
+      }
+      if (withdrawsValue) {
+        await withdrawItemValues(tx, submission.items.map((item) => item.id));
+        if (submission.obligationId) {
+          await tx.obligation.updateMany({
+            where: { id: submission.obligationId, acceptedSubmissionId: id },
+            data: { acceptedSubmissionId: null },
+          });
+        }
       }
       await tx.reviewDecision.create({
         data: { submissionId: id, reviewedById: user.id, decision: reviewType, comment: dto.comments },
@@ -637,18 +791,19 @@ export class DataSubmissionsService {
       if (publishesValue) {
         const approvedAt = new Date();
         for (const item of submission.items) {
-          await tx.kpiValue.upsert({
-            where: { sourceSubmissionItemId: item.id },
-            create: {
+          if (heldBack.has(item.id)) continue;
+          await publishItemValue(
+            tx,
+            {
+              itemId: item.id,
+              submissionId: id,
               kpiDefinitionId: item.kpiDefinitionId,
-              institutionId: submission.institutionId,
+              canonicalKpiId: item.kpiDefinition.canonicalKpiId,
               period: item.period,
               value: item.value,
-              sourceSubmissionItemId: item.id,
-              approvedAt,
             },
-            update: { value: item.value, approvedAt },
-          });
+            { institutionId: submission.institutionId, approvedAt, actorId: user.id },
+          );
         }
         if (submission.obligationId) {
           await tx.obligation.update({
@@ -656,6 +811,10 @@ export class DataSubmissionsService {
             data: { acceptedSubmissionId: id },
           });
         }
+      }
+
+      if (consolidated) {
+        rollup = await rollupNationalKpis(tx, quartersTouched(submission.items.map((item) => item.period)), user.id);
       }
     });
 
@@ -666,7 +825,7 @@ export class DataSubmissionsService {
     });
 
     const published = publishesValue
-      ? submission.items.map((item) => ({
+      ? submission.items.filter((item) => !heldBack.has(item.id)).map((item) => ({
           kpiId: item.kpiDefinitionId,
           kpiName: item.kpiDefinition.name,
           reportingPeriod: item.period,
@@ -674,9 +833,16 @@ export class DataSubmissionsService {
         }))
       : [];
     const status = workflowStatus(dto.decision);
-    const message = published.length
-      ? `Decision recorded: ${status.label}. Published to ${published.map((p) => p.kpiName).join(", ")}.`
-      : `Decision recorded: ${status.label}.`;
+    const heldBackNames = submission.items.filter((item) => heldBack.has(item.id)).map((item) => item.kpiDefinition.name);
+    const message =
+      (published.length
+        ? `Decision recorded: ${status.label}. Published to ${published.map((p) => p.kpiName).join(", ")}.`
+        : `Decision recorded: ${status.label}.`) +
+      (consolidated
+        ? rollupNote((rollup as RollupOutcome | null)?.published ?? [], (rollup as RollupOutcome | null)?.waiting ?? [])
+        : publishesValue && heldBackNames.length
+          ? heldBackNote(heldBackNames)
+          : "");
 
     return {
       submissionId: id,
@@ -749,7 +915,18 @@ export class DataSubmissionsService {
       },
       include: { _count: { select: { reviewingSubmissions: { where: { status: "PENDING" } } } } },
     });
-    if (reviewers.length === 0) return null;
+    if (reviewers.length === 0) {
+      const platformWide = await this.prisma.user.findMany({
+        where: {
+          reviewsAllInstitutions: true,
+          status: "ACTIVE",
+          ...(allowSelfReview ? {} : { id: { not: submitterId } }),
+        },
+        include: { _count: { select: { reviewingSubmissions: { where: { status: "PENDING" } } } } },
+      });
+      platformWide.sort((a, b) => a._count.reviewingSubmissions - b._count.reviewingSubmissions);
+      return platformWide[0]?.id ?? null;
+    }
     reviewers.sort((a, b) => a._count.reviewingSubmissions - b._count.reviewingSubmissions);
     return reviewers[0].id;
   }
@@ -828,6 +1005,47 @@ export class DataSubmissionsService {
     }
   }
 
+  private async assertNothingWaiting(targets: { obligationId: string; period: string }[]) {
+    const waiting = await this.prisma.submission.findMany({
+      where: { obligationId: { in: targets.map((target) => target.obligationId) }, status: { in: BLOCKING_STATUSES } },
+      select: { obligationId: true, status: true },
+    });
+    if (waiting.length === 0) return;
+    const blocked = new Set(waiting.map((entry) => entry.obligationId));
+    const onlyProvisional = waiting.every((entry) => entry.status === "PROVISIONALLY_APPROVED");
+    throw new ConflictException(
+      alreadyWaitingMessage(
+        targets.filter((target) => blocked.has(target.obligationId)).map((target) => target.period),
+        onlyProvisional,
+      ),
+    );
+  }
+
+  private async createIfNothingWaiting(
+    obligationId: string,
+    period: string,
+    data: Prisma.SubmissionUncheckedCreateInput,
+  ) {
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${obligationId}))`;
+      const waiting = await tx.submission.findFirst({
+        where: { obligationId, status: { in: BLOCKING_STATUSES } },
+        select: { id: true, status: true },
+      });
+      if (waiting) {
+        throw new ConflictException(alreadyWaitingMessage([period], waiting.status === "PROVISIONALLY_APPROVED"));
+      }
+      const previous = await tx.submission.findFirst({
+        where: { obligationId, nextVersion: null },
+        orderBy: { version: "desc" },
+        select: { id: true, version: true },
+      });
+      return tx.submission.create({
+        data: previous ? { ...data, version: previous.version + 1, previousVersionId: previous.id } : data,
+      });
+    });
+  }
+
   private async findObligationWithFields(obligationId: string) {
     const obligation = await this.prisma.obligation.findUnique({
       where: { id: obligationId },
@@ -857,7 +1075,7 @@ function buildObligationStats(views: ReturnType<typeof toObligationView>[]) {
     byStatus: [...byStatus.values()],
     overdueCount: overdueViews.length,
     averageDaysOverdue,
-    openCount: views.length,
+    openCount: views.filter((v) => v.status.code !== "provisional").length,
   };
 }
 

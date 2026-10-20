@@ -17,6 +17,7 @@ describe("Submission decision institution scope", () => {
             id: "submission",
             institutionId,
             submittedById: "submitter",
+            submittedBy: { institution: { type: "NERC" } },
             status: "PENDING",
             items: [],
             obligationId: null,
@@ -36,7 +37,11 @@ describe("Submission decision institution scope", () => {
     const { service, updateMany, create } = fixture("inst-a");
     await service.recordDecision(user, "submission", { decision: "rejected", comments: "Correction needed" });
     expect(updateMany).toHaveBeenCalledWith({
-      where: { id: "submission", status: "PENDING", institutionId: "inst-a" },
+      where: {
+        id: "submission",
+        status: "PENDING",
+        OR: [{ institutionId: "inst-a" }, { submittedBy: { institutionId: "inst-a" } }],
+      },
       data: { status: "REJECTED" },
     });
     expect(create).toHaveBeenCalled();

@@ -47,8 +47,8 @@ export class DataSubmissionsController {
   constructor(private readonly dataSubmissions: DataSubmissionsService) {}
 
   @Get("filters")
-  getFilters() {
-    return this.dataSubmissions.getFilters();
+  getFilters(@CurrentUser() user: AuthenticatedUser) {
+    return this.dataSubmissions.getFilters(user);
   }
 
   @Get("datasets")
@@ -72,8 +72,8 @@ export class DataSubmissionsController {
   }
 
   @Get("gaps")
-  getGaps(@Query() query: DataSubmissionsQueryDto) {
-    return this.dataSubmissions.getGaps(query);
+  getGaps(@CurrentUser() user: AuthenticatedUser, @Query() query: DataSubmissionsQueryDto) {
+    return this.dataSubmissions.getGaps(user, query);
   }
 
   @Patch("obligations/:id/focal-person")
@@ -139,11 +139,13 @@ export class DataSubmissionsController {
     return new StreamableFile(buffer);
   }
 
+  @Roles("DATA_REVIEWER", "VALIDATOR", "SYSTEM_ADMINISTRATOR")
   @Get("validation")
   getValidationQueue(@CurrentUser() user: AuthenticatedUser, @Query() query: DataSubmissionsQueryDto) {
     return this.dataSubmissions.getValidationQueue(user, query);
   }
 
+  @Roles("DATA_REVIEWER", "VALIDATOR", "SYSTEM_ADMINISTRATOR")
   @Get("validation/:id")
   getSubmissionDetail(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string) {
     return this.dataSubmissions.getSubmissionDetail(user, id);
