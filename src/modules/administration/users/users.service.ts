@@ -6,6 +6,8 @@ import { PrismaService } from "@/prisma/prisma.service";
 import { RabbitmqService } from "@/events/rabbitmq.service";
 import { toUserAccountResponse } from "@/modules/administration/overview/overview.mappers";
 import type { InviteUserDto } from "@/modules/administration/users/dto/invite-user.dto";
+import type { UpdateUserAccessDto } from "@/modules/administration/users/dto/update-user-access.dto";
+import { reviewScopeProblem } from "@/modules/administration/users/review-scope-rules";
 
 @Injectable()
 export class UsersService {
@@ -37,7 +39,10 @@ export class UsersService {
       throw new ConflictException("A user account already exists for that email.");
     }
 
-    const institution = await this.resolveInstitution(dto.institution);
+    const reviewsAll = dto.reviewsAllInstitutions === true;
+    const scopeProblem = reviewScopeProblem(roles, dto.institution, reviewsAll);
+    if (scopeProblem) throw new BadRequestException(scopeProblem);
+    const institution = reviewsAll ? null : await this.resolveInstitution(dto.institution as string);
     const message = `An invitation was sent to ${dto.email}.`;
 
     if (existing) {
@@ -48,7 +53,8 @@ export class UsersService {
           designation: dto.designation,
           role: roles[0],
           roles,
-          institutionId: institution.id,
+          institutionId: institution?.id ?? null,
+          reviewsAllInstitutions: reviewsAll,
         },
         include: { institution: true },
       });
@@ -69,7 +75,8 @@ export class UsersService {
         designation: dto.designation,
         role: roles[0],
         roles,
-        institutionId: institution.id,
+        institutionId: institution?.id ?? null,
+        reviewsAllInstitutions: reviewsAll,
         passwordHash,
       },
       include: { institution: true },
@@ -105,6 +112,14 @@ export class UsersService {
     }
     const existing = await this.prisma.user.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException("User account not found.");
+    const scopeProblem = reviewScopeProblem(
+      roles,
+      existing.institutionId ?? (existing.reviewsAllInstitutions ? null : ""),
+      existing.reviewsAllInstitutions,
+    );
+    if (scopeProblem && (existing.reviewsAllInstitutions || existing.institutionId)) {
+      throw new BadRequestException(scopeProblem);
+    }
     const user = await this.prisma.user.update({
       where: { id },
       data: { role: roles[0], roles },
@@ -119,11 +134,50 @@ export class UsersService {
     const institution = await this.resolveInstitution(institutionName);
     const user = await this.prisma.user.update({
       where: { id },
-      data: { institutionId: institution.id },
+      data: { institutionId: institution.id, reviewsAllInstitutions: false },
       include: { institution: true },
     });
     return toUserAccountResponse(user);
   }
+
+  async updateAccess(id: string, dto: UpdateUserAccessDto) {
+    const existing = await this.prisma.user.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundException("User account not found.");
+    const roles = dto.roles;
+    if (!roles.length || new Set(roles).size !== roles.length) {
+      throw new BadRequestException("Select at least one distinct role.");
+    }
+    const reviewsAll = dto.reviewsAllInstitutions === true;
+    const problem = reviewScopeProblem(roles, dto.institution, reviewsAll);
+    if (problem) throw new BadRequestException(problem);
+
+    const email = dto.email?.trim();
+    const emailChanged = email !== undefined && email.toLowerCase() !== existing.email.toLowerCase();
+    if (emailChanged) {
+      const taken = await this.prisma.user.findFirst({
+        where: { email: { equals: email, mode: "insensitive" }, id: { not: id } },
+        select: { id: true },
+      });
+      if (taken) throw new ConflictException("A user account already exists for that email.");
+    }
+
+    const institution = dto.institution?.trim() ? await this.resolveInstitution(dto.institution) : null;
+    const user = await this.prisma.user.update({
+      where: { id },
+      data: {
+        role: roles[0],
+        roles,
+        institutionId: institution?.id ?? null,
+        reviewsAllInstitutions: reviewsAll,
+        ...(dto.name !== undefined ? { fullName: dto.name.trim() } : {}),
+        ...(dto.designation !== undefined ? { designation: dto.designation.trim() } : {}),
+        ...(emailChanged ? { email, tokenVersion: { increment: 1 } } : {}),
+      },
+      include: { institution: true },
+    });
+    return toUserAccountResponse(user);
+  }
+
 
   /**
    * "institution" arrives as free text (matches the real contract - see

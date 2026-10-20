@@ -1,5 +1,5 @@
 import { Transform } from "class-transformer";
-import { ArrayNotEmpty, ArrayUnique, IsArray, IsEmail, IsEnum, IsOptional, IsString, Matches, MaxLength, MinLength } from "class-validator";
+import { ArrayNotEmpty, ArrayUnique, IsArray, IsBoolean, IsEmail, IsEnum, IsOptional, IsString, Matches, MaxLength, MinLength, ValidateIf } from "class-validator";
 import { RoleName, ScopeLevel } from "@prisma/client";
 import { parseKebabEnum } from "@/common/utils/enum-casing";
 
@@ -25,10 +25,15 @@ export class InviteUserDto {
   @IsEmail({}, { message: "Enter a valid email address" })
   email!: string;
 
+  @ValidateIf((dto: InviteUserDto) => dto.reviewsAllInstitutions !== true)
   @IsString()
   @MinLength(1, { message: "Select an institution" })
   @Matches(NO_HTML_MARKUP, { message: `Institution ${NO_HTML_MARKUP_MESSAGE}` })
-  institution!: string;
+  institution?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  reviewsAllInstitutions?: boolean;
 
   @IsString()
   @MinLength(2, { message: "Enter the designation" })

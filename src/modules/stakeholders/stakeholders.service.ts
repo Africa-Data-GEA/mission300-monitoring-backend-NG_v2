@@ -1,10 +1,17 @@
 import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
+import type { Prisma } from "@prisma/client";
+import { institutionStatus } from "@/modules/stakeholders/institution-status";
+import { CANONICAL_INSTITUTIONS, normalizeInstitutionToken, resolveInstitutionSources } from "@/common/institutions/institution-alias";
 import { PrismaService } from "@/prisma/prisma.service";
 import type { StakeholdersQueryDto } from "@/modules/stakeholders/dto/stakeholders-query.dto";
 import type {
   CreateDataCustodianDto,
   UpdateDataCustodianDto,
 } from "@/modules/stakeholders/dto/upsert-data-custodian.dto";
+import type {
+  CreateInstitutionDto,
+  UpdateInstitutionDto,
+} from "@/modules/stakeholders/dto/upsert-institution.dto";
 
 const ROLE_LABELS: Record<string, string> = {
   SYSTEM_ADMINISTRATOR: "System Administrator",
@@ -56,10 +63,6 @@ type InstitutionWithRelations = {
   obligations: { dataset: { name: string } }[];
 };
 
-function toStatus(institution: InstitutionWithRelations): string {
-  if (institution.users.some((user) => user.status === "ACTIVE")) return "active";
-  return "pending-onboarding";
-}
 
 const withAll = (label: string, options: { value: string; label: string }[]) => [
   { value: "all", label: `All ${label}` },
@@ -76,6 +79,111 @@ export class StakeholdersService {
 
   findInstitutions() {
     return this.prisma.institution.findMany();
+  }
+
+  private async assertUniqueInstitutionName(name: string, exceptId?: string) {
+    const trimmed = name.trim();
+    const others = await this.prisma.institution.findMany({
+      where: exceptId ? { id: { not: exceptId } } : {},
+      select: { id: true, name: true },
+    });
+    const token = normalizeInstitutionToken(trimmed);
+    const resolved = resolveInstitutionSources(trimmed);
+    const canonicalId = resolved.slugs.length === 1 && resolved.unresolved.length === 0 ? CANONICAL_INSTITUTIONS[resolved.slugs[0]].id : null;
+    const duplicate = others.find(
+      (other) =>
+        other.name.trim().toLowerCase() === trimmed.toLowerCase() ||
+        normalizeInstitutionToken(other.name) === token ||
+        (canonicalId !== null && other.id === canonicalId),
+    );
+    if (duplicate) {
+      throw new ConflictException(`An institution named ${trimmed} already exists as ${duplicate.name}.`);
+    }
+  }
+
+  async createInstitution(dto: CreateInstitutionDto) {
+    await this.assertUniqueInstitutionName(dto.name);
+    const institution = await this.prisma.institution.create({
+      data: { name: dto.name.trim(), type: dto.type.trim() },
+    });
+    return { institution, message: `${institution.name} added.` };
+  }
+
+  async updateInstitution(id: string, dto: UpdateInstitutionDto) {
+    const existing = await this.prisma.institution.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundException("Unknown institution.");
+
+    const newName = dto.name?.trim();
+    const renamed = newName !== undefined && newName !== existing.name;
+    if (renamed) await this.assertUniqueInstitutionName(newName, id);
+
+    const requestedType = dto.type?.trim();
+    const typeChanged =
+      requestedType !== undefined &&
+      requestedType !== existing.type &&
+      toInstitutionType(requestedType) !== toInstitutionType(existing.type);
+
+    const institution = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.institution.update({
+        where: { id },
+        data: { ...(renamed ? { name: newName } : {}), ...(typeChanged ? { type: requestedType } : {}) },
+      });
+      if (renamed) await this.renameStoredInstitutionName(tx, existing.name, newName);
+      return updated;
+    });
+    return { institution, message: `${institution.name} updated.` };
+  }
+
+  private async renameStoredInstitutionName(tx: Prisma.TransactionClient, from: string, to: string) {
+    const exact = { equals: from, mode: "insensitive" as const };
+    await tx.kpiDefinition.updateMany({ where: { sourceInstitution: exact }, data: { sourceInstitution: to } });
+    await tx.bottleneck.updateMany({ where: { institution: exact }, data: { institution: to } });
+    await tx.escalation.updateMany({ where: { owner: exact }, data: { owner: to } });
+    await tx.programme.updateMany({ where: { leadInstitution: exact }, data: { leadInstitution: to } });
+    await tx.project.updateMany({ where: { owner: exact }, data: { owner: to } });
+    await tx.milestone.updateMany({ where: { leadInstitution: exact }, data: { leadInstitution: to } });
+    await tx.scopeAssignment.updateMany({ where: { level: "INSTITUTION", scope: exact }, data: { scope: to } });
+
+    const programmes = await tx.programme.findMany({
+      where: { supportingInstitutions: { has: from } },
+      select: { id: true, supportingInstitutions: true },
+    });
+    for (const programme of programmes) {
+      await tx.programme.update({
+        where: { id: programme.id },
+        data: { supportingInstitutions: programme.supportingInstitutions.map((name) => (name === from ? to : name)) },
+      });
+    }
+  }
+
+  async deleteInstitution(id: string) {
+    const existing = await this.prisma.institution.findUnique({
+      where: { id },
+      include: {
+        _count: {
+          select: {
+            users: true,
+            submissions: true,
+            dataCustodians: true,
+            ownedDatasets: true,
+            obligations: true,
+            kpiSources: true,
+            ledProgrammes: true,
+          },
+        },
+      },
+    });
+    if (!existing) throw new NotFoundException("Unknown institution.");
+
+    const relatedRecords = Object.values(existing._count).reduce((sum, count) => sum + count, 0);
+    if (relatedRecords > 0) {
+      throw new ConflictException(
+        `${existing.name} cannot be removed while it has users, datasets, submissions, assignments, or delivery records.`,
+      );
+    }
+
+    await this.prisma.institution.delete({ where: { id } });
+    return { message: `${existing.name} removed.` };
   }
 
   findDataCustodians() {
@@ -146,12 +254,23 @@ export class StakeholdersService {
   }
 
   async getOverview(query: StakeholdersQueryDto) {
-    const [institutionRows, custodianRows, programmes, datasets, kpis] = await Promise.all([
+    const [institutionRows, custodianRows, programmes, datasets, kpis, approvedSubmissions, publishedValues, performanceRecords] = await Promise.all([
       this.prisma.institution.findMany({ include: INSTITUTION_INCLUDE, orderBy: { name: "asc" } }),
       this.prisma.dataCustodian.findMany({ include: { institution: true } }),
       this.prisma.programme.findMany({ select: { name: true, leadInstitution: true } }),
       this.prisma.dataset.findMany({ select: { name: true, frequency: true, templateFileName: true } }),
       this.prisma.kpiDefinition.findMany({ select: { code: true, name: true }, orderBy: { code: "asc" } }),
+      this.prisma.submission.groupBy({
+        by: ["institutionId"],
+        where: { status: { in: ["APPROVED", "PROVISIONALLY_APPROVED"] } },
+      }),
+      this.prisma.kpiValue.groupBy({ by: ["institutionId"] }),
+      this.prisma.discoPerformanceRecord.groupBy({ by: ["institutionId"] }),
+    ]);
+    const institutionsWithData = new Set([
+      ...approvedSubmissions.map((row) => row.institutionId),
+      ...publishedValues.map((row) => row.institutionId),
+      ...performanceRecords.map((row) => row.institutionId),
     ]);
 
     const datasetsByName = new Map(datasets.map((dataset) => [dataset.name, dataset]));
@@ -175,7 +294,11 @@ export class StakeholdersService {
         name: institution.name,
         shortName: toShortName(institution.name),
         type: toInstitutionType(institution.type),
-        status: toStatus(institution),
+        status: institutionStatus({
+          userStatuses: institution.users.map((user) => user.status),
+          hasApprovedData: institutionsWithData.has(institution.id),
+          datasetOrObligationCount: institution.ownedDatasets.length + institution.obligations.length,
+        }),
         coverage: "Not specified",
         roles: roles.length > 0 ? roles : ["No platform user assigned"],
         datasets: institutionDatasets,
@@ -188,9 +311,11 @@ export class StakeholdersService {
       const dataset = datasetsByName.get(custodian.scope);
       return {
         id: custodian.id,
+        institutionId: custodian.institutionId,
         dataset: custodian.scope,
         custodian: custodian.institution.name,
         focalPerson: custodian.contactName,
+        contactEmail: custodian.contactEmail,
         frequency: dataset?.frequency ?? "Not specified",
         template: dataset?.templateFileName ?? "Not specified",
         reviewer: "Unassigned",
@@ -232,8 +357,8 @@ export class StakeholdersService {
     return {
       summary: {
         activeInstitutions: institutions.filter((institution) => institution.status === "active").length,
-        dataCustodians: custodians.length,
-        pendingOnboarding: institutions.filter((institution) => institution.status === "pending-onboarding").length,
+        dataCustodians: institutions.filter((institution) => institution.datasets.length > 0).length,
+        pendingOnboarding: institutions.filter((institution) => institution.status !== "active").length,
       },
       institutions: filtered,
       custodians: filteredCustodians,

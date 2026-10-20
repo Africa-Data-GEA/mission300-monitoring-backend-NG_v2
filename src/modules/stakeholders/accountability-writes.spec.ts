@@ -47,6 +47,9 @@ describe("Accountability write endpoints (isolated app, no database)", () => {
   };
 
   const stakeholders = {
+    createInstitution: jest.fn().mockResolvedValue({ institution: { id: "institution-b" }, message: "ok" }),
+    updateInstitution: jest.fn().mockResolvedValue({ institution: { id: "institution-b" }, message: "ok" }),
+    deleteInstitution: jest.fn().mockResolvedValue({ message: "ok" }),
     createDataCustodian: jest.fn().mockResolvedValue({ custodian: { id: "cust-1" }, message: "ok" }),
     updateDataCustodian: jest.fn().mockResolvedValue({ custodian: { id: "cust-1" }, message: "ok" }),
     deleteDataCustodian: jest.fn().mockResolvedValue({ message: "ok" }),
@@ -86,6 +89,39 @@ describe("Accountability write endpoints (isolated app, no database)", () => {
     contactEmail: "custodian@example.gov.ng",
     scope: "DisCo metering returns",
   };
+
+  const validInstitution = { name: "Nigerian Bulk Electricity Trading", type: "Federal Agency" };
+
+  it("prevents a read-only user from adding an institution", async () => {
+    await request(app.getHttpServer())
+      .post("/stakeholders/institutions")
+      .set("Authorization", `Bearer ${token("reader")}`)
+      .send(validInstitution)
+      .expect(403);
+    expect(stakeholders.createInstitution).not.toHaveBeenCalled();
+  });
+
+  it("lets an administrator add, edit, and remove an institution", async () => {
+    const authorization = { Authorization: `Bearer ${token("admin")}` };
+    await request(app.getHttpServer())
+      .post("/stakeholders/institutions")
+      .set(authorization)
+      .send(validInstitution)
+      .expect(201);
+    await request(app.getHttpServer())
+      .patch("/stakeholders/institutions/institution-b")
+      .set(authorization)
+      .send({ name: "NBET" })
+      .expect(200);
+    await request(app.getHttpServer())
+      .delete("/stakeholders/institutions/institution-b")
+      .set(authorization)
+      .expect(200);
+
+    expect(stakeholders.createInstitution).toHaveBeenCalledWith(validInstitution);
+    expect(stakeholders.updateInstitution).toHaveBeenCalledWith("institution-b", { name: "NBET" });
+    expect(stakeholders.deleteInstitution).toHaveBeenCalledWith("institution-b");
+  });
 
   it("rejects an unauthenticated attempt to add a data custodian", async () => {
     await request(app.getHttpServer())

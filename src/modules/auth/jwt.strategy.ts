@@ -37,6 +37,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       role: user.role,
       roles: user.roles.length ? user.roles : [user.role],
       institutionId: user.institutionId,
+      reviewsAllInstitutions: user.reviewsAllInstitutions,
     };
   }
 }

@@ -5,6 +5,7 @@ export interface AuthenticatedUser {
   role: string;
   roles?: string[];
   institutionId: string | null;
+  reviewsAllInstitutions?: boolean;
 }
 
 // Usage: findAll(@CurrentUser() user: AuthenticatedUser). Populated by

@@ -6,6 +6,10 @@ import {
   CreateDataCustodianDto,
   UpdateDataCustodianDto,
 } from "@/modules/stakeholders/dto/upsert-data-custodian.dto";
+import {
+  CreateInstitutionDto,
+  UpdateInstitutionDto,
+} from "@/modules/stakeholders/dto/upsert-institution.dto";
 import { AuditAction } from "@/common/decorators/audit-action.decorator";
 import { Roles } from "@/common/decorators/roles.decorator";
 
@@ -24,6 +28,24 @@ export class StakeholdersController {
   @Get("institutions")
   findInstitutions() {
     return this.stakeholders.findInstitutions();
+  }
+
+  @Post("institutions")
+  @AuditAction("stakeholder.institution_created")
+  createInstitution(@Body() dto: CreateInstitutionDto) {
+    return this.stakeholders.createInstitution(dto);
+  }
+
+  @Patch("institutions/:id")
+  @AuditAction("stakeholder.institution_updated")
+  updateInstitution(@Param("id") id: string, @Body() dto: UpdateInstitutionDto) {
+    return this.stakeholders.updateInstitution(id, dto);
+  }
+
+  @Delete("institutions/:id")
+  @AuditAction("stakeholder.institution_deleted")
+  deleteInstitution(@Param("id") id: string) {
+    return this.stakeholders.deleteInstitution(id);
   }
 
   @Get("data-custodians")

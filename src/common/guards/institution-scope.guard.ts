@@ -3,8 +3,13 @@ import type { AuthenticatedUser } from "@/common/decorators/current-user.decorat
 
 const UNSCOPED_ROLES = ["SYSTEM_ADMINISTRATOR", "DASHBOARD_MANAGER", "OVERSIGHT_USER", "READ_ONLY_USER"];
 
-function isUnscopedRole(user: AuthenticatedUser): boolean {
-  return (user.roles?.length ? user.roles : [user.role]).some((role) => UNSCOPED_ROLES.includes(role));
+const REVIEW_ROLES = ["DATA_REVIEWER", "VALIDATOR"];
+
+export function isUnscopedRole(user: AuthenticatedUser): boolean {
+  const roles = user.roles?.length ? user.roles : [user.role];
+  if (roles.some((role) => UNSCOPED_ROLES.includes(role))) return true;
+  const reviewsOnly = roles.some((role) => REVIEW_ROLES.includes(role)) && !roles.includes("INSTITUTIONAL_DATA_PROVIDER");
+  return reviewsOnly && user.reviewsAllInstitutions === true && !user.institutionId;
 }
 
 /**
@@ -38,6 +43,23 @@ export class InstitutionScopeGuard implements CanActivate {
     }
     return true;
   }
+}
+
+export function scopeSubmissionFilter(user: AuthenticatedUser): {
+  OR?: ({ institutionId: string } | { submittedBy: { institutionId: string } })[];
+} {
+  if (isUnscopedRole(user)) return {};
+  const own = user.institutionId ?? "__none__";
+  return { OR: [{ institutionId: own }, { submittedBy: { institutionId: own } }] };
+}
+
+export function assertSubmissionAccess(
+  user: AuthenticatedUser,
+  submission: { institutionId: string; submittedBy?: { institutionId: string | null } | null },
+): void {
+  if (isUnscopedRole(user)) return;
+  if (user.institutionId && (user.institutionId === submission.institutionId || user.institutionId === submission.submittedBy?.institutionId)) return;
+  throw new ForbiddenException("You cannot act on another institution's submission");
 }
 
 /** Reuse the same allow-list from a service method's own scoping check. */
