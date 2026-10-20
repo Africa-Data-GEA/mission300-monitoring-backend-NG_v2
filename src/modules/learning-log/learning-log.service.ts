@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { LearningLogType } from "@prisma/client";
+import { loadRelatedLinks, loadRelatedOptions, resolveRelated } from "@/modules/learning-log/learning-log-links";
 import { statusProblem } from "@/modules/learning-log/learning-log-status";
 import { PrismaService } from "@/prisma/prisma.service";
 import { paginate } from "@/modules/administration/overview/overview.mappers";
@@ -29,11 +30,15 @@ export class LearningLogService {
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? DEFAULT_PAGE_SIZE;
     const paged = paginate(entries, page, pageSize);
+    const links = await loadRelatedLinks(
+      this.prisma,
+      paged.items.map((entry) => entry.relatedRecord),
+    );
 
     return {
       lastUpdated: entries[0]?.decidedAt.toISOString() ?? new Date().toISOString(),
       entries: {
-        items: paged.items.map(toLearningLogEntry),
+        items: paged.items.map((entry) => toLearningLogEntry(entry, links)),
         page: paged.page,
         pageSize: paged.pageSize,
         total: paged.total,
@@ -45,6 +50,8 @@ export class LearningLogService {
     const entryType = dto.entryType ?? LearningLogType.DECISION;
     const problem = statusProblem(entryType, dto.status);
     if (problem) throw new BadRequestException(problem);
+    const relatedRecord = dto.relatedRecord?.trim() || null;
+    if (relatedRecord) await this.assertRelatedExists(relatedRecord);
 
     const entry = await this.prisma.learningLogEntry.create({
       data: {
@@ -57,7 +64,7 @@ export class LearningLogService {
         lesson: dto.lesson?.trim() ?? "",
         recommendation: dto.recommendation?.trim() ?? "",
         evidence: dto.evidence?.trim() ?? "",
-        relatedRecord: dto.relatedRecord?.trim() || null,
+        relatedRecord,
         reviewCycle: dto.reviewCycle.trim(),
         status: dto.status,
         decidedById: user.id,
@@ -65,8 +72,9 @@ export class LearningLogService {
       include: ENTRY_INCLUDE,
     });
 
+    const links = await loadRelatedLinks(this.prisma, [entry.relatedRecord]);
     return {
-      entry: toLearningLogEntry(entry),
+      entry: toLearningLogEntry(entry, links),
       message: `${entry.id} has been added to the learning log.`,
     };
   }
@@ -78,6 +86,8 @@ export class LearningLogService {
       const problem = statusProblem(existing.entryType, dto.status);
       if (problem) throw new BadRequestException(problem);
     }
+    const nextRelated = dto.relatedRecord?.trim();
+    if (nextRelated && nextRelated !== existing.relatedRecord) await this.assertRelatedExists(nextRelated);
 
     const entry = await this.prisma.learningLogEntry.update({
       where: { id },
@@ -97,10 +107,21 @@ export class LearningLogService {
       include: ENTRY_INCLUDE,
     });
 
+    const links = await loadRelatedLinks(this.prisma, [entry.relatedRecord]);
     return {
-      entry: toLearningLogEntry(entry),
+      entry: toLearningLogEntry(entry, links),
       message: `${entry.id} has been updated.`,
     };
+  }
+
+  getRelatedOptions() {
+    return loadRelatedOptions(this.prisma);
+  }
+
+  private async assertRelatedExists(reference: string) {
+    if (!(await resolveRelated(this.prisma, reference))) {
+      throw new BadRequestException("Select a KPI, programme or project from the list.");
+    }
   }
 
   async delete(id: string) {

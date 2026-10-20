@@ -24,6 +24,11 @@ export class LearningLogController {
     return this.learningLog.getOverview(query);
   }
 
+  @Get("options")
+  getRelatedOptions() {
+    return this.learningLog.getRelatedOptions();
+  }
+
   @Post()
   @Roles(...OPERATIONAL_MANAGERS)
   @AuditAction("learning_log.entry_created")
