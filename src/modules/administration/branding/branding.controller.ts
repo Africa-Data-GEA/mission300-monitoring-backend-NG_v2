@@ -90,4 +90,14 @@ export class BrandingController {
   uploadLogo(@UploadedFile() file: Express.Multer.File) {
     return this.branding.uploadLogo(file);
   }
+
+  @ApiBearerAuth()
+  @Roles("SYSTEM_ADMINISTRATOR")
+  @Post("crest")
+  @ApiConsumes("multipart/form-data")
+  @AuditAction("branding.crest_updated")
+  @UseInterceptors(FileInterceptor("file", { limits: { fileSize: MAX_LOGO_SIZE_BYTES } }))
+  uploadCrest(@UploadedFile() file: Express.Multer.File) {
+    return this.branding.uploadCrest(file);
+  }
 }

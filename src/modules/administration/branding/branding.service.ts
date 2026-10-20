@@ -27,6 +27,10 @@ const DEFAULT_CURRENCY = { code: "NGN", symbol: "₦", locale: "en-NG" };
 const DEFAULT_BRANDING = {
   id: SETTINGS_ID,
   countryName: "Nigeria",
+  officialName: "Federal Republic of Nigeria",
+  agencyName: "Federal Ministry of Power",
+  timezone: "Africa/Lagos",
+  crestUrl: "",
   primaryColor: "#004972",
   secondaryColor: "#ffca05",
   textColor: "#101828",
@@ -55,10 +59,12 @@ export class BrandingService {
   }
 
   updateColors(dto: UpdateBrandColorsDto) {
+    const { currency, ...rest } = dto;
+    const data = { ...rest, ...(currency ? { currency: { ...currency } as Prisma.InputJsonValue } : {}) };
     return this.prisma.brandingSettings.upsert({
       where: { id: SETTINGS_ID },
-      create: { ...DEFAULT_BRANDING, ...dto },
-      update: dto,
+      create: { ...DEFAULT_BRANDING, ...data },
+      update: data,
     });
   }
 
@@ -95,6 +101,21 @@ export class BrandingService {
       where: { id: SETTINGS_ID },
       create: { ...DEFAULT_BRANDING, logoUrl },
       update: { logoUrl },
+    });
+  }
+
+  async uploadCrest(file: Express.Multer.File | undefined) {
+    if (!file) {
+      throw new BadRequestException("Select a crest or flag image to upload.");
+    }
+    const verified = await validateUpload(file, true, 5 * 1024 * 1024);
+    const stored = await this.storage.save(LOGO_SUBDIR, verified);
+    const crestUrl = `/branding/logo/${basename(stored.key)}`;
+
+    return this.prisma.brandingSettings.upsert({
+      where: { id: SETTINGS_ID },
+      create: { ...DEFAULT_BRANDING, crestUrl },
+      update: { crestUrl },
     });
   }
 

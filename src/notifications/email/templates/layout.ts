@@ -18,6 +18,8 @@ export interface EmailBrand {
   primaryColor: string;
   secondaryColor: string;
   logoUrl: string;
+  countryName?: string;
+  officialName?: string;
 }
 
 /**
@@ -140,12 +142,12 @@ export function renderLayout(title: string, bodyHtml: string, brand: EmailBrand,
                 <table role="presentation" cellpadding="0" cellspacing="0">
                   <tr>
                     <td style="background-color: #ffffff; border-radius: 6px; padding: 4px; vertical-align: middle;">
-                      <img src="${logoUrl}" width="40" height="40" alt="Federal Republic of Nigeria coat of arms" style="display: block; width: 40px; height: 40px; border: 0;" />
+                      <img src="${logoUrl}" width="40" height="40" alt="${escapeHtml(brand.officialName ?? "Federal Republic of Nigeria")} coat of arms" style="display: block; width: 40px; height: 40px; border: 0;" />
                     </td>
                     <td style="width: 1px; background-color: rgba(255, 255, 255, 0.25); font-size: 0; line-height: 0;">&nbsp;</td>
                     <td style="vertical-align: middle; padding-left: 14px;">
                       <div style="font-family: ${fontFamily}; color: #ffffff; font-size: 18px; font-weight: 700; letter-spacing: -0.011em;">M300</div>
-                      <div style="font-family: ${fontFamily}; color: rgba(255, 255, 255, 0.68); font-size: 12px; margin-top: 2px;">Nigeria Energy Compact Dashboard</div>
+                      <div style="font-family: ${fontFamily}; color: rgba(255, 255, 255, 0.68); font-size: 12px; margin-top: 2px;">${escapeHtml(brand.countryName ?? "Nigeria")} Energy Compact Dashboard</div>
                     </td>
                   </tr>
                 </table>
@@ -163,7 +165,7 @@ export function renderLayout(title: string, bodyHtml: string, brand: EmailBrand,
             <tr>
               <td style="background-color: ${token.surfaceSunken}; border-top: 1px solid ${token.borderDefault}; padding: 20px 32px;">
                 <p style="margin: 0 0 16px; font-family: ${fontFamily}; font-size: 12px; line-height: 1.5; color: ${token.textMuted};">
-                  M300 Nigeria Energy Compact Dashboard — automated notification, please do not reply.
+                  M300 ${escapeHtml(brand.countryName ?? "Nigeria")} Energy Compact Dashboard — automated notification, please do not reply.
                 </p>
                 <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
                   <tr>

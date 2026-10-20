@@ -1,13 +1,19 @@
 import { Transform } from "class-transformer";
-import { IsEnum, IsOptional, IsString, MinLength } from "class-validator";
-import { LearningLogArea, LearningLogStatus } from "@prisma/client";
+import { IsEnum, IsOptional, IsString, MinLength, ValidateIf } from "class-validator";
+import { LearningLogArea, LearningLogStatus, LearningLogType } from "@prisma/client";
 import { parseKebabEnum } from "@/common/utils/enum-casing";
 
-// Matches createLearningLogEntryRequestSchema exactly (learning-log.ts).
-// The server owns id, decidedBy (the current user) and decidedAt - the
-// client only supplies what a person logging a decision would know, same
-// scoping as the real mock's create handler.
+const isDecision = (dto: CreateLearningLogEntryDto) => (dto.entryType ?? LearningLogType.DECISION) === LearningLogType.DECISION;
+const isLearning = (dto: CreateLearningLogEntryDto) => dto.entryType === LearningLogType.LEARNING;
+
 export class CreateLearningLogEntryDto {
+  @IsOptional()
+  @Transform(({ value }) =>
+    typeof value === "string" ? parseKebabEnum(value, Object.values(LearningLogType), "entryType") : value,
+  )
+  @IsEnum(LearningLogType)
+  entryType?: LearningLogType;
+
   @IsString()
   @MinLength(3, { message: "Give the entry a title" })
   title!: string;
@@ -18,13 +24,33 @@ export class CreateLearningLogEntryDto {
   @IsEnum(LearningLogArea)
   area!: LearningLogArea;
 
+  @ValidateIf(isDecision)
   @IsString()
   @MinLength(10, { message: "Describe what was decided or proposed" })
-  decision!: string;
+  decision?: string;
 
+  @ValidateIf(isDecision)
   @IsString()
   @MinLength(10, { message: "Describe why" })
-  rationale!: string;
+  rationale?: string;
+
+  @ValidateIf(isLearning)
+  @IsString()
+  @MinLength(10, { message: "Describe what happened" })
+  context?: string;
+
+  @ValidateIf(isLearning)
+  @IsString()
+  @MinLength(10, { message: "Describe what was learned" })
+  lesson?: string;
+
+  @IsOptional()
+  @IsString()
+  recommendation?: string;
+
+  @IsOptional()
+  @IsString()
+  evidence?: string;
 
   @IsOptional()
   @IsString()

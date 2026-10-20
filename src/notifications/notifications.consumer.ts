@@ -42,6 +42,8 @@ export class NotificationsConsumer implements OnModuleInit {
       primaryColor: settings.primaryColor,
       secondaryColor: settings.secondaryColor,
       logoUrl: settings.logoUrl,
+      countryName: settings.countryName,
+      officialName: settings.officialName,
     };
   }
 

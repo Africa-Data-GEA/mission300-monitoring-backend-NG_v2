@@ -31,6 +31,24 @@ export class UpdateLearningLogEntryDto {
 
   @IsOptional()
   @IsString()
+  @MinLength(10, { message: "Describe what happened" })
+  context?: string;
+
+  @IsOptional()
+  @IsString()
+  @MinLength(10, { message: "Describe what was learned" })
+  lesson?: string;
+
+  @IsOptional()
+  @IsString()
+  recommendation?: string;
+
+  @IsOptional()
+  @IsString()
+  evidence?: string;
+
+  @IsOptional()
+  @IsString()
   relatedRecord?: string;
 
   @IsOptional()

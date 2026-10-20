@@ -1,4 +1,6 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
+import { LearningLogType } from "@prisma/client";
+import { statusProblem } from "@/modules/learning-log/learning-log-status";
 import { PrismaService } from "@/prisma/prisma.service";
 import { paginate } from "@/modules/administration/overview/overview.mappers";
 import { toLearningLogEntry } from "@/modules/learning-log/learning-log.mappers";
@@ -17,7 +19,9 @@ export class LearningLogService {
   async getOverview(query: LearningLogQueryDto) {
     // Newest first - a decision log reads as a timeline, not a stable-
     // sorted table, matching the real mock's own handler exactly.
+    const type = query.entryType?.toUpperCase();
     const entries = await this.prisma.learningLogEntry.findMany({
+      where: type === "DECISION" || type === "LEARNING" ? { entryType: type } : {},
       include: ENTRY_INCLUDE,
       orderBy: { decidedAt: "desc" },
     });
@@ -38,12 +42,21 @@ export class LearningLogService {
   }
 
   async create(user: AuthenticatedUser, dto: CreateLearningLogEntryDto) {
+    const entryType = dto.entryType ?? LearningLogType.DECISION;
+    const problem = statusProblem(entryType, dto.status);
+    if (problem) throw new BadRequestException(problem);
+
     const entry = await this.prisma.learningLogEntry.create({
       data: {
+        entryType,
         title: dto.title.trim(),
         area: dto.area,
-        decision: dto.decision.trim(),
-        rationale: dto.rationale.trim(),
+        decision: dto.decision?.trim() ?? "",
+        rationale: dto.rationale?.trim() ?? "",
+        context: dto.context?.trim() ?? "",
+        lesson: dto.lesson?.trim() ?? "",
+        recommendation: dto.recommendation?.trim() ?? "",
+        evidence: dto.evidence?.trim() ?? "",
         relatedRecord: dto.relatedRecord?.trim() || null,
         reviewCycle: dto.reviewCycle.trim(),
         status: dto.status,
@@ -61,6 +74,10 @@ export class LearningLogService {
   async update(id: string, dto: UpdateLearningLogEntryDto) {
     const existing = await this.prisma.learningLogEntry.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException("The learning log entry was not found.");
+    if (dto.status) {
+      const problem = statusProblem(existing.entryType, dto.status);
+      if (problem) throw new BadRequestException(problem);
+    }
 
     const entry = await this.prisma.learningLogEntry.update({
       where: { id },
@@ -69,6 +86,10 @@ export class LearningLogService {
         area: dto.area,
         decision: dto.decision?.trim(),
         rationale: dto.rationale?.trim(),
+        context: dto.context?.trim(),
+        lesson: dto.lesson?.trim(),
+        recommendation: dto.recommendation?.trim(),
+        evidence: dto.evidence?.trim(),
         relatedRecord: dto.relatedRecord === undefined ? undefined : dto.relatedRecord.trim() || null,
         reviewCycle: dto.reviewCycle?.trim(),
         status: dto.status,
