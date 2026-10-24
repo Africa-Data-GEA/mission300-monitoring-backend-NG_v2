@@ -2,10 +2,12 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
   Post,
+  Put,
   Query,
   Res,
   StreamableFile,
@@ -16,6 +18,7 @@ import { FileInterceptor } from "@nestjs/platform-express";
 import type { Response } from "express";
 import { ApiTags, ApiBearerAuth, ApiConsumes } from "@nestjs/swagger";
 import { DataSubmissionsService } from "@/modules/data-submissions/data-submissions.service";
+import { EntryDraftsService } from "@/modules/data-submissions/entry-drafts.service";
 import { DataSubmissionsQueryDto } from "@/modules/data-submissions/dto/data-submissions-query.dto";
 import { ManualEntryDto } from "@/modules/data-submissions/dto/manual-entry.dto";
 import { UploadSubmissionDto } from "@/modules/data-submissions/dto/upload-submission.dto";
@@ -44,7 +47,10 @@ const ALLOWED_UPLOAD_MIME_TYPES = [
 @ApiBearerAuth()
 @Controller("data-submissions")
 export class DataSubmissionsController {
-  constructor(private readonly dataSubmissions: DataSubmissionsService) {}
+  constructor(
+    private readonly dataSubmissions: DataSubmissionsService,
+    private readonly drafts: EntryDraftsService,
+  ) {}
 
   @Get("filters")
   getFilters(@CurrentUser() user: AuthenticatedUser) {
@@ -91,8 +97,29 @@ export class DataSubmissionsController {
   @Post("obligations/:id/entry")
   @Roles("SYSTEM_ADMINISTRATOR", "INSTITUTIONAL_DATA_PROVIDER")
   @AuditAction("submission.manual_entry_saved")
-  saveEntry(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string, @Body() dto: ManualEntryDto) {
-    return this.dataSubmissions.saveManualEntry(user, id, dto);
+  async saveEntry(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string, @Body() dto: ManualEntryDto) {
+    const result = await this.dataSubmissions.saveManualEntry(user, id, dto);
+    await this.drafts.clearAfterSubmit(id);
+    return result;
+  }
+
+  @Get("obligations/:id/entry/draft")
+  getEntryDraft(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string) {
+    return this.drafts.get(user, id);
+  }
+
+  @Put("obligations/:id/entry/draft")
+  @Roles("SYSTEM_ADMINISTRATOR", "INSTITUTIONAL_DATA_PROVIDER")
+  @AuditAction("submission.draft_saved")
+  saveEntryDraft(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string, @Body() dto: ManualEntryDto) {
+    return this.drafts.save(user, id, dto);
+  }
+
+  @Delete("obligations/:id/entry/draft")
+  @Roles("SYSTEM_ADMINISTRATOR", "INSTITUTIONAL_DATA_PROVIDER")
+  @AuditAction("submission.draft_discarded")
+  discardEntryDraft(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string) {
+    return this.drafts.discard(user, id);
   }
 
   @Get("obligations/:id/upload")

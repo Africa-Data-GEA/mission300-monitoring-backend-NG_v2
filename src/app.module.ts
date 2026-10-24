@@ -32,6 +32,7 @@ import { ExecutiveOverviewModule } from "@/modules/executive-overview/executive-
 import { PillarDashboardModule } from "@/modules/pillar-dashboard/pillar-dashboard.module";
 import { StateDiscoModule } from "@/modules/state-disco/state-disco.module";
 import { LearningLogModule } from "@/modules/learning-log/learning-log.module";
+import { ReformActionsModule } from "@/modules/reform-actions/reform-actions.module";
 import { PublicOverviewModule } from "@/modules/public-overview/public-overview.module";
 
 @Module({
@@ -73,6 +74,7 @@ import { PublicOverviewModule } from "@/modules/public-overview/public-overview.
     PillarDashboardModule,
     StateDiscoModule,
     LearningLogModule,
+    ReformActionsModule,
     PublicOverviewModule,
   ],
   providers: [

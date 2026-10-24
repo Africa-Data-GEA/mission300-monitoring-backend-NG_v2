@@ -24,7 +24,7 @@ const enumCases: EnumCase[] = Object.entries(PrismaClient).flatMap(([enumName, c
 
 describe("Prisma enum wire-format contracts", () => {
   it("discovers the expected generated Prisma enum surface", () => {
-    expect(enumCases).toHaveLength(144);
+    expect(enumCases).toHaveLength(150);
   });
 
   it.each(enumCases)("round-trips $enumName.$value through kebab-case", ({ enumName, value, values }) => {

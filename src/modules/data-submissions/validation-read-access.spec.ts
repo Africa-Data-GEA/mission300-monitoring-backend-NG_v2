@@ -11,6 +11,7 @@ import { RolesGuard } from "@/common/guards/roles.guard";
 import { PrismaService } from "@/prisma/prisma.service";
 import { DataSubmissionsController } from "@/modules/data-submissions/data-submissions.controller";
 import { DataSubmissionsService } from "@/modules/data-submissions/data-submissions.service";
+import { EntryDraftsService } from "@/modules/data-submissions/entry-drafts.service";
 
 describe("HARD-001 validation read authorization", () => {
   let app: INestApplication;
@@ -47,6 +48,7 @@ describe("HARD-001 validation read authorization", () => {
           useValue: { user: { findUnique: jest.fn(async ({ where }) => users[where.id] ?? null) } },
         },
         { provide: DataSubmissionsService, useValue: service },
+        { provide: EntryDraftsService, useValue: {} },
         JwtStrategy,
         { provide: APP_GUARD, useClass: JwtAuthGuard },
         { provide: APP_GUARD, useClass: RolesGuard },

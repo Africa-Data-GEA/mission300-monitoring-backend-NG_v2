@@ -117,6 +117,8 @@ model User {
   auditLogEntries  AuditLogEntry[]
   savedReports     SavedReport[]
   learningLogEntries LearningLogEntry[]
+  reformActionsCreated ReformAction[] @relation("ReformActionCreatedBy")
+  reformActionChanges ReformActionStatusChange[]
   uploadedFiles    UploadedFile[]
   webhookSubscriptions WebhookSubscription[]
   passwordResetTokens  PasswordResetToken[]
@@ -124,6 +126,7 @@ model User {
   scopeAssignments     ScopeAssignment[]
   focalForObligations  Obligation[]
   reviewingSubmissions Submission[]      @relation("SubmissionReviewer")
+  entryDrafts          EntryDraft[]      @relation("EntryDraftSavedBy")
   notifications        Notification[]
 
   @@index([institutionId])
@@ -267,6 +270,7 @@ model Pillar {
   kpis        KpiDefinition[]
   datasets    Dataset[]
   programmes  Programme[]
+  reformActions ReformAction[]
   projects    Project[]
   bottlenecks Bottleneck[]
 
@@ -504,11 +508,25 @@ model Obligation {
   updatedAt            DateTime     @updatedAt
 
   submissions          Submission[] @relation("ObligationSubmissions")
+  entryDraft           EntryDraft?
 
   @@unique([institutionId, datasetId, reportingPeriod])
   @@index([institutionId])
   @@index([datasetId])
   @@map("obligations")
+}
+
+model EntryDraft {
+  obligationId String   @id
+  obligation   Obligation @relation(fields: [obligationId], references: [id], onDelete: Cascade)
+  payload      Json
+  savedById    String
+  savedBy      User     @relation("EntryDraftSavedBy", fields: [savedById], references: [id])
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([savedById])
+  @@map("entry_drafts")
 }
 
 // --- Submissions: draft -> pending -> under_review -> decision ----------
@@ -719,6 +737,7 @@ model Programme {
   updatedAt              DateTime          @updatedAt // serves as the contract's `lastUpdate`
 
   projects               Project[]
+  reformActions          ReformAction[]
 
   @@index([pillarId])
   @@index([leadInstitutionId])
@@ -1329,4 +1348,57 @@ model KpiSourceInstitution {
   @@index([kpiDefinitionId])
   @@index([institutionId])
   @@map("kpi_source_institutions")
+}
+
+enum ReformActionStatus {
+  NOT_YET_DUE
+  IN_PROGRESS_ON_TRACK
+  IN_PROGRESS_MINOR_DELAYS
+  IN_PROGRESS_AT_RISK
+  DELAYED
+  COMPLETED
+}
+
+model ReformAction {
+  id                String             @id @default(cuid())
+  pillarId          String
+  pillar            Pillar             @relation(fields: [pillarId], references: [id])
+  commitment        String
+  action            String
+  isPriority        Boolean            @default(false)
+  programmeId       String?
+  programme         Programme?         @relation(fields: [programmeId], references: [id], onDelete: SetNull)
+  leadInstitution   String             @default("")
+  referenceDueDate  DateTime?
+  dueDate           DateTime?
+  completedAt       DateTime?
+  status            ReformActionStatus @default(NOT_YET_DUE)
+  previousStatus    ReformActionStatus?
+  comment           String             @default("")
+  createdById       String
+  createdBy         User               @relation("ReformActionCreatedBy", fields: [createdById], references: [id])
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  history           ReformActionStatusChange[]
+
+  @@index([pillarId])
+  @@index([programmeId])
+  @@index([status])
+  @@map("reform_actions")
+}
+
+model ReformActionStatusChange {
+  id               String              @id @default(cuid())
+  reformActionId   String
+  reformAction     ReformAction        @relation(fields: [reformActionId], references: [id], onDelete: Cascade)
+  fromStatus       ReformActionStatus?
+  toStatus         ReformActionStatus
+  comment          String              @default("")
+  changedById      String
+  changedBy        User                @relation(fields: [changedById], references: [id])
+  changedAt        DateTime            @default(now())
+
+  @@index([reformActionId])
+  @@map("reform_action_status_changes")
 }

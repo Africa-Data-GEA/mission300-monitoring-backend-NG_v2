@@ -20,6 +20,7 @@
     "ingest-fgn-compact-progress-kpi-values.ts",
     "ingest-fgn-compact-progress-electricity-access.ts",
     "ingest-fgn-compact-progress-clean-cooking-headline.ts",
+    "ingest-reform-actions.ts",
     "ingest-niso-generation-kpis.ts",
     "ingest-derived-utility-kpis.ts",
     "ingest-niso-bilateral-kpi.ts",

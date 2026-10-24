@@ -37,6 +37,7 @@ const ORDER = [
   "ingest-fgn-compact-progress-kpi-values",
   "ingest-fgn-compact-progress-electricity-access",
   "ingest-fgn-compact-progress-clean-cooking-headline",
+  "ingest-reform-actions",
 ];
 
 const CORRECTIONS = ["correct-nerc-customer-stocks", "backfill-institution-traceability", "apply-period-coverage", "link-duplicate-kpis", "load-status-values"];
