@@ -82,7 +82,7 @@ jobs:
         # accounts and rely on the seed institutions - migrate alone leaves
         # an empty database, so every login 401s. Passed locally only because
         # the dev DB had already been seeded.
-        run: pnpm prisma:seed
+        run: pnpm exec ts-node prisma/seed-e2e.ts
 
       - name: Unit tests
         run: pnpm test

@@ -13,14 +13,16 @@ pnpm docker:dev
 API at `http://localhost:3000`, Swagger at `/docs`.
 
 ```bash
-pnpm docker:prisma:seed              # demo accounts
+pnpm docker:prisma:seed              # roles, pillars, states and one administrator
 pnpm docker:api:build                # required before next line
 pnpm docker:prisma:seed:reference    # real M300 data
 ```
 
 Always use the `docker:` scripts — bare host commands can't reach `DATABASE_URL`.
 
-Demo login (`ChangeMe123!`): `admin@m300.local`, `provider@m300.local`, `reviewer@m300.local`.
+Administrator login: `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD` from `.env.development`, or `admin@m300.local` / `ChangeMe123!` when they are blank. Change that password before sharing the environment. Create providers and reviewers from the Administration page.
+
+The e2e suite needs demo fixtures: `pnpm exec ts-node prisma/seed-e2e.ts` loads them into a throwaway test database only.
 
 ## If seed/build looks stale
 
