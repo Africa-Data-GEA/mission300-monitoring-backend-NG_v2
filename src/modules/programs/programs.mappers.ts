@@ -10,6 +10,16 @@ import type {
 } from "@prisma/client";
 import { toKebabCase } from "@/common/utils/enum-casing";
 
+const UNASSIGNED_CONTACT_EMAIL = "unassigned@example.gov.ng";
+const EMAIL_PATTERN = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+
+export function projectContact(project: Pick<Project, "contactName" | "contactEmail" | "leadName">) {
+  return {
+    contactName: project.contactName.trim() || project.leadName.trim() || "Not assigned",
+    contactEmail: EMAIL_PATTERN.test(project.contactEmail.trim()) ? project.contactEmail.trim() : UNASSIGNED_CONTACT_EMAIL,
+  };
+}
+
 function toNumber(value: unknown): number {
   return value === null || value === undefined ? 0 : Number(value);
 }
@@ -84,8 +94,7 @@ export function toProjectRecord(p: ProjectFull, bottleneckIds: string[]) {
       budgetUsd: toNumber(p.budgetUsd),
       disbursedUsd: toNumber(p.disbursedUsd),
       contractor: p.contractor,
-      contactName: p.contactName,
-      contactEmail: p.contactEmail,
+      ...projectContact(p),
       documents: p.documents.map((d) => ({ label: d.label, url: d.url })),
       updates: p.updates.map((u) => ({ date: u.date.toISOString(), note: u.note })),
     },

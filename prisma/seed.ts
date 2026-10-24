@@ -563,6 +563,8 @@ async function main() {
       name: "DARES Mini-Grid Cluster 12 (Pipeline)",
       owner: "Rural Electrification Agency",
       leadName: "Fatima Suleiman",
+      contactName: "Fatima Suleiman",
+      contactEmail: "fatima.suleiman@rea.example.gov.ng",
       location: "Cluster 12, North East",
       latitude: 12.0,
       longitude: 13.7,
