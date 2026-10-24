@@ -62,7 +62,7 @@ async function main() {
     if (conflicts.length > 0) blocked = true;
     if (dryRun) continue;
 
-    await prisma.kpiDefinition.update({ where: { id: alias.id }, data: { canonicalKpiId: canonical.id } });
+    await prisma.kpiDefinition.update({ where: { id: alias.id }, data: { canonicalKpiId: canonical.id, isActive: false } });
 
     for (const value of [...plan.create, ...plan.update]) {
       if (!value.institutionId) {
