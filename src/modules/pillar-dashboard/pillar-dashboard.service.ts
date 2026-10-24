@@ -8,7 +8,7 @@ import {
   toBottleneckRecord,
 } from "@/modules/bottlenecks/bottlenecks.mappers";
 import { toKebabCase } from "@/common/utils/enum-casing";
-import { reportingPeriodKey } from "@/common/utils/reporting-period";
+import { reportingPeriodKey, withoutFuturePeriods } from "@/common/utils/reporting-period";
 import {
   PILLAR_HEADLINE_KPI_CODES,
   PILLAR_LABELS,
@@ -51,7 +51,16 @@ export class PillarDashboardService {
       where: { pillarId: pillar.id, isActive: true },
       include: KPI_PROFILE_INCLUDE,
     });
-    const kpiIds = kpis.map((k) => k.id);
+    const activeCodes = new Set(kpis.map((k) => k.code));
+    const retiredHeadlineCodes = headlineCodes.filter((code) => !activeCodes.has(code));
+    const retiredHeadline = retiredHeadlineCodes.length
+      ? await this.prisma.kpiDefinition.findMany({
+          where: { code: { in: retiredHeadlineCodes } },
+          include: KPI_PROFILE_INCLUDE,
+        })
+      : [];
+    const profileKpis = [...kpis, ...retiredHeadline];
+    const kpiIds = profileKpis.map((k) => k.id);
     const filter = await resolvePillarInstitutionFilter(this.prisma, institution);
     const ownedKpiIds = filter
       ? new Set(
@@ -84,10 +93,11 @@ export class PillarDashboardService {
     // compared parsed period keys instead of raw strings.
     const cutoffKey =
       reportingPeriod && reportingPeriod !== "all" ? reportingPeriodKey(reportingPeriod) : null;
+    const reportedValues = withoutFuturePeriods(fetchedValues);
     const allValues =
       cutoffKey === null
-        ? fetchedValues
-        : fetchedValues.filter((value) => {
+        ? reportedValues
+        : reportedValues.filter((value) => {
             const key = reportingPeriodKey(value.period);
             return key !== null && key <= cutoffKey;
           });
@@ -100,7 +110,7 @@ export class PillarDashboardService {
     }
 
     const profilesByCode = new Map<string, ReturnType<typeof toKpiProfile>>();
-    for (const kpi of kpis) {
+    for (const kpi of profileKpis) {
       profilesByCode.set(kpi.code, toKpiProfile(kpi, valuesByKpi.get(kpi.id) ?? []));
     }
 
