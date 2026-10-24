@@ -63,8 +63,8 @@ async function main() {
     });
   }
 
+  const passwordHash = await argon2.hash("ChangeMe123!");
   const adminEmail = process.env.BOOTSTRAP_ADMIN_EMAIL?.trim().toLowerCase() || "admin@m300.local";
-  const adminPassword = process.env.BOOTSTRAP_ADMIN_PASSWORD?.trim() || "ChangeMe123!";
   await prisma.user.upsert({
     where: { email: adminEmail },
     create: {
@@ -73,7 +73,42 @@ async function main() {
       designation: "System Administrator",
       role: RoleName.SYSTEM_ADMINISTRATOR,
       status: AccountStatus.ACTIVE,
-      passwordHash: await argon2.hash(adminPassword),
+      passwordHash: process.env.BOOTSTRAP_ADMIN_PASSWORD?.trim() ? await argon2.hash(process.env.BOOTSTRAP_ADMIN_PASSWORD.trim()) : passwordHash,
+    },
+    update: {},
+  });
+
+  const providerInstitution = await prisma.institution.upsert({
+    where: { id: "seed-disco-ikeja-electric" },
+    create: { id: "seed-disco-ikeja-electric", name: "Ikeja Electric", type: "Disco" },
+    update: {},
+  });
+
+  await prisma.user.upsert({
+    where: { email: "provider@m300.local" },
+    create: {
+      email: "provider@m300.local",
+      fullName: "Data Provider",
+      designation: "Monitoring Officer",
+      role: RoleName.INSTITUTIONAL_DATA_PROVIDER,
+      status: AccountStatus.ACTIVE,
+      institutionId: providerInstitution.id,
+      passwordHash,
+    },
+    update: {},
+  });
+
+  await prisma.user.upsert({
+    where: { email: "reviewer@m300.local" },
+    create: {
+      email: "reviewer@m300.local",
+      fullName: "Data Reviewer",
+      designation: "Data Reviewer",
+      role: RoleName.DATA_REVIEWER,
+      roles: [RoleName.DATA_REVIEWER],
+      status: AccountStatus.ACTIVE,
+      reviewsAllInstitutions: true,
+      passwordHash,
     },
     update: {},
   });
@@ -86,7 +121,7 @@ async function main() {
     await prisma.state.upsert({ where: { name: state.name }, create: state, update: { zone: state.zone } });
   }
 
-  console.log(`Seed complete: roles, pillars, states and one administrator (${adminEmail}).`);
+  console.log(`Seed complete: roles, pillars, states and the accounts ${adminEmail}, provider@m300.local and reviewer@m300.local.`);
 }
 
 main()
