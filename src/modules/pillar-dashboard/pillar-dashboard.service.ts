@@ -8,6 +8,7 @@ import {
   toBottleneckRecord,
 } from "@/modules/bottlenecks/bottlenecks.mappers";
 import { toKebabCase } from "@/common/utils/enum-casing";
+import { latestDate } from "@/common/utils/latest-date";
 import { reportingPeriodKey, withoutFuturePeriods } from "@/common/utils/reporting-period";
 import {
   PILLAR_HEADLINE_KPI_CODES,
@@ -232,7 +233,13 @@ export class PillarDashboardService {
     return {
       pillar: pillarSlug,
       label: PILLAR_LABELS[pillarSlug],
-      lastUpdated: now.toISOString(),
+      lastUpdated: latestDate(
+        [
+          ...[...profilesByCode.values()].map((profile) => profile.provenance.lastUpdated),
+          ...projects.map((p) => p.updatedAt),
+        ],
+        now,
+      ).toISOString(),
       headlineCards,
       coreIndicators,
       deliveryStatus: { counts, total: statuses.length },

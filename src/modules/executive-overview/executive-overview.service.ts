@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
+import { latestDate } from "@/common/utils/latest-date";
 import { PrismaService } from "@/prisma/prisma.service";
 import { NO_KPI_VALUE_LABEL, toKpiProfile } from "@/modules/kpi-explorer/kpi-explorer.mappers";
 import { toKebabCase } from "@/common/utils/enum-casing";
@@ -215,7 +216,10 @@ export class ExecutiveOverviewService {
         : nationalPerformanceAll.filter((m) => m.pillar === pillarFilter);
 
     return {
-      lastUpdated: new Date().toISOString(),
+      lastUpdated: latestDate([
+        ...profiles.map((profile) => profile.provenance.lastUpdated),
+        deliveryStatus.provenance.lastUpdated,
+      ]).toISOString(),
       appliedPillar: pillarFilter,
       headlineCards,
       cprTargets: this.buildCprTargets(headlineCards),
@@ -508,7 +512,7 @@ export class ExecutiveOverviewService {
         methodology:
           "Exclude completed projects, then count ongoing projects by On Track, At Risk, Delayed and Blocked status. Rank exceptions by severity, delivery impact and days unresolved. Unrelated performance percentages are never averaged.",
         source: "Compact Progress Report, Implementation Register and Bottleneck Register.",
-        lastUpdated: now.toISOString(),
+        lastUpdated: latestDate([...projects.map((p) => p.updatedAt), ...bottlenecks.map((b) => b.dateRaised)], now).toISOString(),
       },
     };
   }
