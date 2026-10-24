@@ -2177,7 +2177,7 @@
     "name": "Nigeria Interconnected with Synchronised West African Grid",
     "unit": "status",
     "pillarSlug": "regional-integration",
-    "isActive": true,
+    "isActive": false,
     "category": "Governance",
     "readiness": "SUPPORTING",
     "definition": "Status of Nigeria's technical synchronisation and operational participation in the West African Power Pool (WAPP) synchronised AC grid, which currently spans from Senegal to Benin across 12 ECOWAS member states, enabling real-time power exchange and regional electricity market operation",
