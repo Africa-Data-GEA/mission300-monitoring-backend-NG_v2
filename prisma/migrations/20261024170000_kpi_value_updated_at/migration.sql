@@ -1,0 +1,3 @@
+ALTER TABLE "kpi_values" ADD COLUMN "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP;
+
+UPDATE "kpi_values" SET "updatedAt" = LEAST("approvedAt", CURRENT_TIMESTAMP);

@@ -397,6 +397,7 @@ model KpiValue {
   /// Months of the period the value actually covers when that is fewer than a
   /// full quarter (e.g. "Apr–May"). Null for a complete period.
   coverageNote        String?
+  updatedAt           DateTime       @default(now()) @updatedAt
 
   @@index([kpiDefinitionId, period])
   @@map("kpi_values")

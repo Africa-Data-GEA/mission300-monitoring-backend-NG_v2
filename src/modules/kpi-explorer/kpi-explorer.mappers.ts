@@ -107,6 +107,10 @@ function toResolvedSourceInstitutions(kpi: KpiWithPillar) {
 }
 
 /** Matches kpiCatalogueRowSchema exactly (m300-frontend/src/api/schemas/kpi-explorer.ts). */
+export function recordedAt(value: { approvedAt: Date; updatedAt?: Date } | null | undefined): Date | null {
+  return value ? (value.updatedAt ?? value.approvedAt) : null;
+}
+
 export function toCatalogueRow(kpi: KpiWithPillar, latestValue: ValueWithProvenance | null) {
   const submissionStatus = latestValue?.sourceSubmissionItem.submission.status ?? null;
   return {
@@ -121,7 +125,7 @@ export function toCatalogueRow(kpi: KpiWithPillar, latestValue: ValueWithProvena
     frequency: kpi.frequency || "Not supplied",
     readiness: toKebabCase(kpi.readiness),
     validationStatus: deriveValidationStatus(submissionStatus),
-    lastUpdated: notInFuture(latestValue?.approvedAt ?? kpi.updatedAt).toISOString(),
+    lastUpdated: notInFuture(recordedAt(latestValue) ?? kpi.updatedAt).toISOString(),
     active: kpi.isActive,
   };
 }
@@ -206,7 +210,7 @@ export function toKpiProfile(kpi: KpiWithFullProfile, allKpiValues: ValueWithPro
       : undefined;
 
   const definitionText = kpi.definition || "Not yet documented.";
-  const lastUpdated = notInFuture(latest?.approvedAt ?? kpi.updatedAt).toISOString();
+  const lastUpdated = notInFuture(recordedAt(latest) ?? kpi.updatedAt).toISOString();
 
   return {
     id: kpi.code,
