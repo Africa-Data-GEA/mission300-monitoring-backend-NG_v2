@@ -6,6 +6,7 @@ import type {
   State,
 } from "@prisma/client";
 import { toKebabCase } from "@/common/utils/enum-casing";
+import { formatPeriodLabel } from "@/modules/kpi-explorer/kpi-explorer.mappers";
 
 /**
  * State/DisCo is NOT a read-composition layer like Executive Overview or
@@ -90,18 +91,22 @@ type RecordWithInstitution = DiscoPerformanceRecord & { institution: Institution
  * both need every row in the comparison to compute a relative scale/rank,
  * so the service adds those after mapping the whole batch.
  */
-export function toDiscoComparisonRowBase(record: RecordWithInstitution) {
+type RemittanceSource = Pick<DiscoPerformanceRecord, "period" | "remittanceObligationNgn" | "remittanceActualNgn">;
+
+export function toDiscoComparisonRowBase(record: RecordWithInstitution, remittanceSource: RemittanceSource = record) {
   const meteringRate = ratio(record.meteredCustomers, record.activeCustomers);
   const billingEfficiency = ratio(toNumber(record.energyBilledMwh), toNumber(record.energyReceivedMwh));
   const collectionEfficiency = ratio(toNumber(record.revenueCollectedNgn), toNumber(record.revenueBilledNgn));
-  const remittanceObligationNgn = toNumber(record.remittanceObligationNgn);
-  const remittancePerformance = ratio(toNumber(record.remittanceActualNgn), remittanceObligationNgn);
+  const remittanceObligationNgn = toNumber(remittanceSource.remittanceObligationNgn);
+  const remittancePerformance = ratio(toNumber(remittanceSource.remittanceActualNgn), remittanceObligationNgn);
+  const remittancePeriodSuffix =
+    remittanceSource.period === record.period ? "" : ` (${formatPeriodLabel(remittanceSource.period)})`;
   // Same "no obligation reported" case the market-remittance headline card
   // already distinguishes from a real 0% (state-disco.service.ts) - without
   // this, a DisCo with no remittance data loaded read as "we checked and
   // it's zero" instead of "we don't have this figure yet".
   const remittancePerformanceLabel =
-    remittanceObligationNgn > 0 ? formatPercent(remittancePerformance) : "Not reported";
+    remittanceObligationNgn > 0 ? `${formatPercent(remittancePerformance)}${remittancePeriodSuffix}` : "Not reported";
 
   return {
     id: record.institutionId,

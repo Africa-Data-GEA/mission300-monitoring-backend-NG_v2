@@ -40,6 +40,11 @@ export class StateDiscoController {
     return this.stateDisco.getComparison(query);
   }
 
+  @Get("trends")
+  getTrends(@Query() query: StateDiscoQueryDto) {
+    return this.stateDisco.getTrends(query);
+  }
+
   @Get("supply-tariff")
   getSupplyTariff(@Query() query: StateDiscoQueryDto) {
     return this.stateDisco.getSupplyTariff(query);

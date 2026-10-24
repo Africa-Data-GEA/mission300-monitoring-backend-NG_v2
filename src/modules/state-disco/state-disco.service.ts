@@ -191,6 +191,95 @@ export class StateDiscoService {
     return result;
   }
 
+  private async getRemittancePosition(selection: string, periodFilter: string) {
+    const periods = periodFilter === "all" ? null : [periodFilter, previousPeriodOf(periodFilter)].filter((p): p is string => p !== null);
+    const records = await this.prisma.discoPerformanceRecord.findMany({
+      where: {
+        remittanceObligationNgn: { gt: 0 },
+        ...(selection === "national" ? {} : { institutionId: selection }),
+        ...(periods ? { period: { in: periods } } : {}),
+      },
+      select: { period: true, remittanceObligationNgn: true, remittanceActualNgn: true },
+    });
+
+    const byPeriod = new Map<string, { obligation: number; actual: number }>();
+    for (const record of records) {
+      const entry = byPeriod.get(record.period) ?? { obligation: 0, actual: 0 };
+      entry.obligation += Number(record.remittanceObligationNgn);
+      entry.actual += Number(record.remittanceActualNgn);
+      byPeriod.set(record.period, entry);
+    }
+
+    const latestPeriod =
+      periodFilter === "all"
+        ? [...byPeriod.keys()].sort((a, b) => periodSortKey(b) - periodSortKey(a))[0]
+        : byPeriod.has(periodFilter)
+          ? periodFilter
+          : undefined;
+    if (!latestPeriod) return null;
+
+    const priorPeriod = previousPeriodOf(latestPeriod);
+    return {
+      period: latestPeriod,
+      current: byPeriod.get(latestPeriod)!,
+      previous: priorPeriod ? (byPeriod.get(priorPeriod) ?? null) : null,
+    };
+  }
+
+  async getTrends(query: StateDiscoQueryDto) {
+    const selection = query.distributionCompany ?? "national";
+
+    let selectedLabel = "National (all DisCos)";
+    if (selection !== "national") {
+      const institution = await this.prisma.institution.findUnique({ where: { id: selection } });
+      if (!institution) throw new NotFoundException("Unknown Distribution Company.");
+      selectedLabel = institution.name;
+    }
+
+    const records = await this.prisma.discoPerformanceRecord.findMany({
+      where: selection === "national" ? {} : { institutionId: selection },
+    });
+
+    const byPeriod = new Map<string, typeof records>();
+    for (const record of records) {
+      const list = byPeriod.get(record.period) ?? [];
+      list.push(record);
+      byPeriod.set(record.period, list);
+    }
+
+    const roundOne = (value: number) => Math.round(value * 10) / 10;
+    const points = [...byPeriod.entries()]
+      .filter(([period]) => periodSortKey(period) !== -Infinity)
+      .sort(([a], [b]) => periodSortKey(a) - periodSortKey(b))
+      .map(([period, list]) => {
+        const totals = this.aggregateNational(list);
+        return {
+          period,
+          label: formatPeriodLabel(period),
+          meteringRate:
+            totals.activeCustomers > 0 ? roundOne(ratio(totals.meteredCustomers, totals.activeCustomers)) : null,
+          atccLossRate:
+            totals.energyReceivedMwh > 0 && totals.revenueBilledNgn > 0 ? roundOne(totals.atccLossRatePercent) : null,
+          collectionEfficiency:
+            totals.revenueBilledNgn > 0 ? roundOne(ratio(totals.revenueCollectedNgn, totals.revenueBilledNgn)) : null,
+          remittancePerformance:
+            totals.remittanceObligationNgn > 0
+              ? roundOne(ratio(totals.remittanceActualNgn, totals.remittanceObligationNgn))
+              : null,
+          reportingDiscos: list.length,
+        };
+      });
+
+    return {
+      meta: this.buildMeta(
+        "Performance trends",
+        "Quarter-by-quarter metering, loss, collection and remittance performance for the selected Distribution Company.",
+      ),
+      selectedUtility: selectedLabel,
+      points,
+    };
+  }
+
   async getOverview(query: StateDiscoQueryDto) {
     const selection = query.distributionCompany ?? "national";
     const periodFilter = query.reportingPeriod ?? "all";
@@ -288,7 +377,8 @@ export class StateDiscoService {
 
     const meteringRate = ratio(current.meteredCustomers, current.activeCustomers);
     const collectionEfficiency = ratio(current.revenueCollectedNgn, current.revenueBilledNgn);
-    const remittancePerformance = ratio(current.remittanceActualNgn, current.remittanceObligationNgn);
+    const remittance = await this.getRemittancePosition(selection, periodFilter);
+    const remittancePerformance = remittance ? ratio(remittance.current.actual, remittance.current.obligation) : 0;
 
     const noPriorTrend = (direction: "higher-is-better" | "lower-is-better") => ({
       change: 0,
@@ -379,19 +469,22 @@ export class StateDiscoService {
       {
         id: "market-remittance",
         title: "Market-remittance performance",
-        value: current.remittanceObligationNgn > 0 ? formatPercent(remittancePerformance) : "Not reported",
-        supportingLabel:
-          current.remittanceObligationNgn > 0
-            ? `${formatNgnBillions(current.remittanceActualNgn)} of ${formatNgnBillions(current.remittanceObligationNgn)} obligation remitted`
-            : "No remittance obligation reported for this period",
+        value: remittance ? formatPercent(remittancePerformance) : "Not reported",
+        supportingLabel: remittance
+          ? `${formatNgnBillions(remittance.current.actual)} of ${formatNgnBillions(remittance.current.obligation)} obligation remitted (${formatPeriodLabel(remittance.period)})`
+          : "No remittance obligation reported for this period",
         benchmarkLabel: "100% of applicable obligation",
-        varianceLabel: `${(remittancePerformance - 100).toFixed(1)} pts vs 100% compliance`,
+        varianceLabel: remittance
+          ? `${(remittancePerformance - 100).toFixed(1)} pts vs 100% compliance`
+          : "No variance available - no remittance obligation reported",
         progressPercent: Math.max(0, Math.min(100, Math.round(remittancePerformance))),
-        trend: trendFor(
-          remittancePerformance,
-          previous ? ratio(previous.remittanceActualNgn, previous.remittanceObligationNgn) : undefined,
-          "higher-is-better",
-        ),
+        trend: remittance
+          ? trendFor(
+              remittancePerformance,
+              remittance.previous ? ratio(remittance.previous.actual, remittance.previous.obligation) : undefined,
+              "higher-is-better",
+            )
+          : { change: 0, label: "No remittance data to compare", direction: "higher-is-better" as const },
         provenance: provenance(
           "Actual market remittance as a share of applicable obligation.",
           "Actual remittance divided by the applicable Nigerian Bulk Electricity Trading Plc or Market Operator obligation, multiplied by 100.",
@@ -422,7 +515,22 @@ export class StateDiscoService {
         ? scoped
         : scoped.filter((r) => toKebabCase(r.validationStatus) === validationFilter);
 
-    const baseRows = filtered.map((r) => toDiscoComparisonRowBase(r));
+    const remittanceRecords = await this.prisma.discoPerformanceRecord.findMany({
+      where: {
+        remittanceObligationNgn: { gt: 0 },
+        institutionId: { in: filtered.map((r) => r.institutionId) },
+      },
+      select: { institutionId: true, period: true, remittanceObligationNgn: true, remittanceActualNgn: true },
+    });
+    const latestRemittance = new Map<string, (typeof remittanceRecords)[number]>();
+    for (const record of remittanceRecords) {
+      const existing = latestRemittance.get(record.institutionId);
+      if (!existing || periodSortKey(record.period) > periodSortKey(existing.period)) {
+        latestRemittance.set(record.institutionId, record);
+      }
+    }
+
+    const baseRows = filtered.map((r) => toDiscoComparisonRowBase(r, latestRemittance.get(r.institutionId) ?? r));
 
     const maxEnergyReceived = Math.max(1, ...baseRows.map((r) => r.energyReceivedValue));
     const maxEnergyBilled = Math.max(1, ...baseRows.map((r) => r.energyBilledValue));
