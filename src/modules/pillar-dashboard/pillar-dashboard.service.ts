@@ -120,7 +120,15 @@ export class PillarDashboardService {
         `Pillar dashboard "${pillarSlug}" references unseeded KPI code(s): ${missingHeadline.join(", ")}.`,
       );
     }
-    const headlineCards = headlineCodes.map((code) => toPillarHeadlineCard(profilesByCode.get(code)!));
+    const kpiIdByCode = new Map(profileKpis.map((k) => [k.code, k.id]));
+    const institutionLabel = filter?.names[0] ?? "this institution";
+    const headlineCards = headlineCodes.map((code) => {
+      const profile = profilesByCode.get(code)!;
+      const owned = !ownedKpiIds || ownedKpiIds.has(kpiIdByCode.get(code) ?? "");
+      return toPillarHeadlineCard(
+        owned ? profile : { ...profile, current: null, currentLabel: `Not reported by ${institutionLabel}`, reportingPeriod: "" },
+      );
+    });
 
     const latestByKpi = new Map<string, (typeof allValues)[number]>();
     for (const value of [...allValues].sort((a, b) => b.approvedAt.getTime() - a.approvedAt.getTime())) {

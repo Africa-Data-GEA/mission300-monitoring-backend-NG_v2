@@ -38,10 +38,11 @@ const ORDER = [
   "ingest-fgn-compact-progress-electricity-access",
   "ingest-fgn-compact-progress-clean-cooking-headline",
   "ingest-reform-actions",
+  "backfill-institution-traceability",
   "link-duplicate-kpis",
 ];
 
-const CORRECTIONS = ["correct-nerc-customer-stocks", "backfill-institution-traceability", "apply-period-coverage", "load-status-values"];
+const CORRECTIONS = ["correct-nerc-customer-stocks", "apply-period-coverage", "load-status-values"];
 
 const force = process.argv.includes("--force");
 const onlyArg = process.argv.find((arg) => arg.startsWith("--only="));
