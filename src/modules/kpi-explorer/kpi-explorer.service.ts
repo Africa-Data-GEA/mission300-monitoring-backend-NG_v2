@@ -11,7 +11,7 @@ import type { SetKpiCurrentValueDto } from "@/modules/kpi-explorer/dto/set-kpi-c
 import type { AuthenticatedUser } from "@/common/decorators/current-user.decorator";
 import { formatPeriodLabel, toCatalogueRow, toKpiProfile } from "@/modules/kpi-explorer/kpi-explorer.mappers";
 import { ADMIN_OVERRIDE_SOURCE_REFERENCE } from "@/modules/kpi-explorer/admin-override.constant";
-import { compareReportingValues } from "@/common/utils/reporting-period";
+import { compareReportingValues, withoutFuturePeriods } from "@/common/utils/reporting-period";
 import { statusValueError } from "@/common/kpi/status-values";
 import {
   CANONICAL_INSTITUTIONS,
@@ -114,7 +114,7 @@ export class KpiExplorerService {
     ]);
 
     const latestByKpi = new Map<string, (typeof allValues)[number]>();
-    for (const value of allValues) {
+    for (const value of withoutFuturePeriods(allValues)) {
       const previous = latestByKpi.get(value.kpiDefinitionId);
       if (!previous || compareReportingValues(value, previous) > 0) latestByKpi.set(value.kpiDefinitionId, value);
     }

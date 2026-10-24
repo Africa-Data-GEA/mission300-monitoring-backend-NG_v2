@@ -10,7 +10,7 @@ import type {
 } from "@prisma/client";
 import { toKebabCase } from "@/common/utils/enum-casing";
 import { ADMIN_OVERRIDE_SOURCE_REFERENCE } from "@/modules/kpi-explorer/admin-override.constant";
-import { compareReportingValues } from "@/common/utils/reporting-period";
+import { compareReportingValues, notInFuture, withoutFuturePeriods } from "@/common/utils/reporting-period";
 import { isStatusUnit, statusLabel } from "@/common/kpi/status-values";
 
 type ValueWithProvenance = KpiValue & { sourceSubmissionItem: SubmissionItem & { submission: Submission } };
@@ -121,7 +121,7 @@ export function toCatalogueRow(kpi: KpiWithPillar, latestValue: ValueWithProvena
     frequency: kpi.frequency || "Not supplied",
     readiness: toKebabCase(kpi.readiness),
     validationStatus: deriveValidationStatus(submissionStatus),
-    lastUpdated: (latestValue?.approvedAt ?? kpi.updatedAt).toISOString(),
+    lastUpdated: notInFuture(latestValue?.approvedAt ?? kpi.updatedAt).toISOString(),
     active: kpi.isActive,
   };
 }
@@ -169,7 +169,8 @@ function toRelatedIndicators(kpi: KpiWithFullProfile) {
  * Implementation Register (Programs/Projects) hasn't been rebuilt to a
  * real contract yet, so there's nothing real to join against.
  */
-export function toKpiProfile(kpi: KpiWithFullProfile, kpiValues: ValueWithProvenance[]) {
+export function toKpiProfile(kpi: KpiWithFullProfile, allKpiValues: ValueWithProvenance[]) {
+  const kpiValues = withoutFuturePeriods(allKpiValues);
   const sorted = [...kpiValues].sort(compareReportingValues);
   const latestByPeriod = new Map<string, ValueWithProvenance>();
   for (const value of sorted) latestByPeriod.set(value.period.toLowerCase(), value);
@@ -205,7 +206,7 @@ export function toKpiProfile(kpi: KpiWithFullProfile, kpiValues: ValueWithProven
       : undefined;
 
   const definitionText = kpi.definition || "Not yet documented.";
-  const lastUpdated = (latest?.approvedAt ?? kpi.updatedAt).toISOString();
+  const lastUpdated = notInFuture(latest?.approvedAt ?? kpi.updatedAt).toISOString();
 
   return {
     id: kpi.code,

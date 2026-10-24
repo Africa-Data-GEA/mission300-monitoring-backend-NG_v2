@@ -20,3 +20,33 @@ describe("reporting chronology", () => {
     expect(reportingPeriodKey("Q2-2026")).toBeLessThan(reportingPeriodKey("2026")!);
   });
 });
+
+import { isFuturePeriod, notInFuture, withoutFuturePeriods } from "./reporting-period";
+
+describe("future periods", () => {
+  const now = new Date("2026-10-24T10:00:00Z");
+
+  it("treats a period as future only once it has not yet started", () => {
+    expect(isFuturePeriod("2026", now)).toBe(false);
+    expect(isFuturePeriod("q4-2026", now)).toBe(false);
+    expect(isFuturePeriod("q1-2027", now)).toBe(true);
+    expect(isFuturePeriod("2027", now)).toBe(true);
+    expect(isFuturePeriod("2045", now)).toBe(true);
+    expect(isFuturePeriod("2026-11", now)).toBe(true);
+    expect(isFuturePeriod("2026-10", now)).toBe(false);
+  });
+
+  it("does not treat an unrecognised period as future", () => {
+    expect(isFuturePeriod("baseline", now)).toBe(false);
+  });
+
+  it("drops future periods and keeps the rest", () => {
+    const values = [{ period: "2025" }, { period: "2026" }, { period: "2030" }];
+    expect(withoutFuturePeriods(values, now).map((value) => value.period)).toEqual(["2025", "2026"]);
+  });
+
+  it("never reports a date later than now", () => {
+    expect(notInFuture(new Date("2026-12-31T00:00:00Z"), now)).toBe(now);
+    expect(notInFuture(new Date("2026-06-30T00:00:00Z"), now).toISOString()).toBe("2026-06-30T00:00:00.000Z");
+  });
+});
