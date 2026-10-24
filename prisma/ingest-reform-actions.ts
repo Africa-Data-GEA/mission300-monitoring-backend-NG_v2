@@ -6,6 +6,7 @@ import { PrismaClient, type ReformActionStatus } from "@prisma/client";
 const DATA_PATH = join(process.cwd(), "prisma", "data", "reform-actions.json");
 
 interface SourceAction {
+  id: string;
   pillar: string;
   serial: string;
   commitment: string;
@@ -29,7 +30,6 @@ async function main() {
   if (!admin) throw new Error("No SYSTEM_ADMINISTRATOR user found.");
 
   const pillars = new Map((await prisma.pillar.findMany()).map((pillar) => [pillar.slug, pillar.id]));
-  const counters = new Map<string, number>();
   let created = 0;
   let skipped = 0;
 
@@ -37,9 +37,7 @@ async function main() {
     const pillarId = pillars.get(source.pillar);
     if (!pillarId) throw new Error(`Pillar ${source.pillar} is not loaded - run ingest-kpi-directory first.`);
 
-    const position = (counters.get(source.pillar) ?? 0) + 1;
-    counters.set(source.pillar, position);
-    const id = `reform-action-${source.pillar}-${String(position).padStart(2, "0")}`;
+    const id = source.id;
 
     if (await prisma.reformAction.findUnique({ where: { id }, select: { id: true } })) {
       skipped += 1;
