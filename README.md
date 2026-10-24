@@ -1,6 +1,6 @@
-# M300 Nigeria Energy Compact Dashboard — Backend
+# Mission 300 Compact Monitoring Platform — Backend
 
-NestJS API for the M300 monitoring dashboard. Docker-only — no native run path.
+NestJS API for the Mission 300 Compact Monitoring Platform. Docker-only — no native run path.
 
 ## Setup
 

@@ -1,3 +1,4 @@
+import { PLATFORM_NAME } from "@/common/platform-name";
 import { z } from "zod";
 
 // Fails startup fast and loudly if a required env var is missing or malformed,
@@ -31,7 +32,7 @@ export const envSchema = z.object({
   // m300.energymrc.ng is the frontend's own domain (CORS_ORIGIN/
   // FRONTEND_URL) and was never verified for sending - every send to it
   // failed with a 403 from Resend until this changed.
-  EMAIL_FROM: z.string().default("M300 Compact Dashboard <notifications@raven-emrc.com>"),
+  EMAIL_FROM: z.string().default(`${PLATFORM_NAME} <notifications@raven-emrc.com>`),
 
   // Base URL of the frontend - used only to build set-password/reset-password
   // links in emails (e.g. `${FRONTEND_URL}/account/set-password?token=...`),

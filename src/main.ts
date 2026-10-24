@@ -1,3 +1,4 @@
+import { PLATFORM_NAME } from "@/common/platform-name";
 import "reflect-metadata";
 import cookieParser from "cookie-parser";
 import compression from "compression";
@@ -36,8 +37,8 @@ async function bootstrap() {
   app.useGlobalFilters(new HttpExceptionFilter());
 
   const swaggerConfig = new DocumentBuilder()
-    .setTitle("M300 API")
-    .setDescription("Nigeria Energy Compact monitoring dashboard - backend API")
+    .setTitle(`${PLATFORM_NAME} API`)
+    .setDescription(`${PLATFORM_NAME} - backend API`)
     .setVersion("0.1.0")
     .addBearerAuth()
     .build();

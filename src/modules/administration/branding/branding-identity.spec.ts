@@ -87,12 +87,13 @@ describe("emails carry the saved country", () => {
 
   it("names the saved country in the header and footer, and the official name on the crest", () => {
     const html = renderLayout("Hello", "<p>Body</p>", brand);
-    expect(html).toContain("Ghana Energy Compact Dashboard");
+    expect(html).toContain("Mission 300 Compact Monitoring Platform");
+    expect(html).toContain("(Ghana)");
     expect(html).toContain("Republic of Ghana coat of arms");
     expect(html).not.toContain("Nigeria");
   });
 
   it("falls back to Nigeria when no country was passed", () => {
-    expect(renderLayout("Hello", "<p>Body</p>", { primaryColor: "#004972", secondaryColor: "#ffca05", logoUrl: "" })).toContain("Nigeria Energy Compact Dashboard");
+    expect(renderLayout("Hello", "<p>Body</p>", { primaryColor: "#004972", secondaryColor: "#ffca05", logoUrl: "" })).toContain("(Nigeria)");
   });
 });

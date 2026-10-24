@@ -1,3 +1,4 @@
+import { PLATFORM_NAME } from "@/common/platform-name";
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import { ReportType, ValidationStatus, KpiReadinessTier, type Prisma } from "@prisma/client";
 import { PrismaService } from "@/prisma/prisma.service";
@@ -265,11 +266,11 @@ export class ReportsService {
         reportingPeriod: "Not period-specific — methodology, not values",
         appliedFilters: [] as { label: string; value: string }[],
         generatedAt: new Date().toISOString(),
-        dataVersion: `M300 live database, ${new Date().toISOString().slice(0, 10)}`,
+        dataVersion: `${PLATFORM_NAME} live database, ${new Date().toISOString().slice(0, 10)}`,
         sourceNotes: "Master KPI Registry — definition and calculation methodology per indicator.",
         validationStatus: "Not applicable — methodology text, not a validated figure.",
         units: "Not applicable.",
-        limitations: "Generated from the M300 platform's live database.",
+        limitations: `Generated from the ${PLATFORM_NAME} live database.`,
       },
       sections: [
         {
@@ -296,12 +297,12 @@ export class ReportsService {
         reportingPeriod: reportingLabel(config, options),
         appliedFilters: reportAppliedFilters(config, options),
         generatedAt: now,
-        dataVersion: `M300 live database, ${now.slice(0, 10)}`,
+        dataVersion: `${PLATFORM_NAME} live database, ${now.slice(0, 10)}`,
         sourceNotes: catalogueEntry.dataSource,
         validationStatus: reportValidationLabel(config, options),
         units: "As recorded per indicator; see indicator metadata for unit definitions.",
         limitations:
-          "Generated from the M300 platform's live database. Verify against the approved Compact Progress Report before external distribution.",
+          `Generated from the ${PLATFORM_NAME} live database. Verify against the approved Compact Progress Report before external distribution.`,
       },
       sections: await this.sectionsFor(config.reportType, config),
     };
