@@ -127,7 +127,9 @@ export class PillarDashboardService {
       const profile = profilesByCode.get(code)!;
       const owned = !ownedKpiIds || ownedKpiIds.has(kpiIdByCode.get(code) ?? "");
       return toPillarHeadlineCard(
-        owned ? profile : { ...profile, current: null, currentLabel: `Not reported by ${institutionLabel}`, reportingPeriod: "" },
+        owned
+          ? profile
+          : { ...profile, current: null, currentLabel: `Not reported by ${institutionLabel}`, reportingPeriod: "", trend: undefined, history: [] },
       );
     });
 

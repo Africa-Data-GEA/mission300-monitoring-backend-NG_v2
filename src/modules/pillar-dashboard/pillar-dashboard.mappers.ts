@@ -64,6 +64,8 @@ export function toPillarHeadlineCard(profile: KpiProfile) {
     direction: profile.direction,
     validationStatus: profile.validationStatus,
     provenance: profile.provenance,
+    trend: profile.trend,
+    sparkline: profile.history.map((point) => ({ period: point.period, value: point.value })),
   };
 }
 
@@ -83,6 +85,7 @@ export function toPillarCoreIndicator(profile: KpiProfile, group: string) {
     period: profile.reportingPeriod || null,
     direction: profile.direction,
     history: profile.history.map((point) => point.value),
+    sparkline: profile.history.map((point) => ({ period: point.period, value: point.value })),
     validationStatus: profile.validationStatus,
     provenance: profile.provenance,
   };
