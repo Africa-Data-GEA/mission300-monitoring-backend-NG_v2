@@ -31,9 +31,10 @@ services:
       - "${RABBITMQ_MANAGEMENT_HOST_PORT:-15672}:15672"
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
-      interval: 5s
-      timeout: 5s
+      interval: 15s
+      timeout: 30s
       retries: 10
+      start_period: 90s
 
   api:
     build:
