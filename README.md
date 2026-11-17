@@ -50,6 +50,8 @@ New dependency → `up -d --build --force-recreate -V`.
 
 ## Quality
 
+Outside Docker, first run `copy .env.test.example .env.test`. `pnpm install` generates the Prisma client automatically.
+
 ```bash
 pnpm typecheck
 pnpm lint
