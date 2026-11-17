@@ -38,6 +38,17 @@ function periodOf(year: number, monthName: string): string {
   return `q${quarter}-${year}`;
 }
 
+const LAST_RELIABLE_PERIOD = "q2-2025";
+
+function periodOrder(period: string): number {
+  const match = /^q([1-4])-(\d{4})$/.exec(period);
+  return match ? Number(match[2]) * 4 + Number(match[1]) : 0;
+}
+
+function afterCutoff(period: string): boolean {
+  return periodOrder(period) > periodOrder(LAST_RELIABLE_PERIOD);
+}
+
 function cellString(value: ExcelJS.CellValue): string {
   if (value === null || value === undefined) return "";
   if (typeof value === "object" && "text" in (value as { text?: string })) {
@@ -188,6 +199,7 @@ async function main() {
         continue;
       }
       const period = periodOf(row.year, row.month);
+      if (afterCutoff(period)) continue;
       const key = `${canonicalDisco}|${period}`;
       const acc = accumulators.get(key) ?? newAccumulator(canonicalDisco, period);
       acc[field] += row.value;
@@ -205,6 +217,7 @@ async function main() {
   accumulate(nbetRemittance, "nbetRemittanceBillionNgn");
 
   for (const [period, snapshot] of customerStocks) {
+    if (afterCutoff(period)) continue;
     for (const [rawDisco, stock] of snapshot.byDisco) {
       const canonicalDisco = resolveDiscoName(rawDisco);
       if (!canonicalDisco) {
