@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, Post, Query } from "@nestjs/common";
+import { Body, Controller, Delete, Get, HttpCode, Param, Post, Query, StreamableFile } from "@nestjs/common";
 import { ApiTags, ApiBearerAuth } from "@nestjs/swagger";
 import { ReportsService } from "@/modules/reports/reports.service";
 import { ReportsQueryDto } from "@/modules/reports/dto/reports-query.dto";
@@ -57,6 +57,13 @@ export class ReportsController {
   @AuditAction("report.deleted")
   async deleteSaved(@Param("id") id: string) {
     await this.reports.deleteSaved(id);
+  }
+
+  @Get("saved/:id/pdf")
+  @Roles("SYSTEM_ADMINISTRATOR", "DASHBOARD_MANAGER", "OVERSIGHT_USER")
+  async getSavedPdf(@Param("id") id: string) {
+    const { buffer, fileName } = await this.reports.getSavedPdf(id);
+    return new StreamableFile(buffer, { type: "application/pdf", disposition: `attachment; filename="${fileName}"` });
   }
 
   @Get("saved/:id/preview")

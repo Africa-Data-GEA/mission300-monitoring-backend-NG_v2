@@ -7,4 +7,5 @@ export { submissionDecisionEmail } from "@/notifications/email/templates/submiss
 export { submissionReceivedEmail } from "@/notifications/email/templates/submission-received";
 export { submissionAwaitingReviewEmail } from "@/notifications/email/templates/submission-awaiting-review";
 export { reportReadyEmail } from "@/notifications/email/templates/report-ready";
+export { executiveBriefEmail } from "@/notifications/email/templates/executive-brief";
 export type { EmailTemplate, EmailBrand } from "@/notifications/email/templates/layout";

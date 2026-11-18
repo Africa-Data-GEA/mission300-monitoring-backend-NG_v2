@@ -116,6 +116,7 @@ model User {
   reviewDecisions  ReviewDecision[]  @relation("ReviewedBy")
   auditLogEntries  AuditLogEntry[]
   savedReports     SavedReport[]
+  reportSchedules  ReportSchedule[]
   learningLogEntries LearningLogEntry[]
   reformActionsCreated ReformAction[] @relation("ReformActionCreatedBy")
   reformActionChanges ReformActionStatusChange[]
@@ -1002,6 +1003,7 @@ enum ReportType {
   FINANCIAL
   SUBMISSION_COMPLIANCE
   DATA_QUALITY
+  EXECUTIVE_BRIEF
 }
 
 // Real contract: reports never generate an actual PDF/XLSX file server-side
@@ -1410,4 +1412,52 @@ model ReformActionStatusChange {
 
   @@index([reformActionId])
   @@map("reform_action_status_changes")
+}
+
+enum ReportScheduleCadence {
+  WEEKLY
+  MONTHLY
+}
+
+enum ReportDeliveryStatus {
+  SENT
+  PARTIAL
+  FAILED
+}
+
+model ReportSchedule {
+  id          String                @id @default(cuid())
+  name        String
+  config      Json
+  cadence     ReportScheduleCadence
+  dayOfWeek   Int?
+  dayOfMonth  Int?
+  hourLagos   Int                   @default(8)
+  recipients  String[]
+  isActive    Boolean               @default(true)
+  nextRunAt   DateTime
+  lastRunAt   DateTime?
+  createdById String
+  createdBy   User                  @relation(fields: [createdById], references: [id])
+  createdAt   DateTime              @default(now())
+  updatedAt   DateTime              @updatedAt
+  deliveries  ReportDelivery[]
+
+  @@index([isActive, nextRunAt])
+  @@map("report_schedules")
+}
+
+model ReportDelivery {
+  id            String               @id @default(cuid())
+  scheduleId    String
+  schedule      ReportSchedule       @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  savedReportId String?
+  status        ReportDeliveryStatus
+  recipients    String[]
+  failedCount   Int                  @default(0)
+  error         String?
+  sentAt        DateTime             @default(now())
+
+  @@index([scheduleId, sentAt])
+  @@map("report_deliveries")
 }

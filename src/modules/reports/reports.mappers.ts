@@ -24,6 +24,7 @@ export const REPORT_TYPES = [
   "FINANCIAL",
   "SUBMISSION_COMPLIANCE",
   "DATA_QUALITY",
+  "EXECUTIVE_BRIEF",
 ] as const;
 
 export type ReportTypeEnum = (typeof REPORT_TYPES)[number];
@@ -40,6 +41,7 @@ export const REPORT_TYPE_CATEGORY: Record<ReportTypeEnum, string> = {
   FINANCIAL: "delivery",
   SUBMISSION_COMPLIANCE: "data-governance",
   DATA_QUALITY: "data-governance",
+  EXECUTIVE_BRIEF: "executive",
 };
 
 /** Matches REPORT_TYPE_LABELS exactly (reports.ts). */
@@ -54,6 +56,7 @@ export const REPORT_TYPE_LABELS: Record<ReportTypeEnum, string> = {
   FINANCIAL: "Financial report",
   SUBMISSION_COMPLIANCE: "Submission-compliance report",
   DATA_QUALITY: "Data-quality report",
+  EXECUTIVE_BRIEF: "Executive brief (one page)",
 };
 
 export interface CatalogueEntry {
@@ -136,6 +139,12 @@ export function buildReportCatalogue(): CatalogueEntry[] {
       "Validation-queue and data-quality output for submitted records.",
       "Summarise expected, received, overdue, approved, returned, rejected and missing records by selected period.",
       "Submission and Validation Registers.",
+    ),
+    entry(
+      "EXECUTIVE_BRIEF",
+      "A standardised one-page summary of headline indicators, pillar progress, bottlenecks and priority actions for ministers and senior stakeholders.",
+      "Reads the latest approved value of each headline indicator, counts projects and open bottlenecks per pillar, and lists the most severe bottlenecks and the priority reform actions that are not yet complete.",
+      "Key Performance Indicator repository, Implementation Register, Bottleneck Register and Reform Action Register.",
     ),
   ];
 }

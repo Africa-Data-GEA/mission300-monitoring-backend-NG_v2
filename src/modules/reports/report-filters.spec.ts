@@ -1,6 +1,7 @@
 import { BadRequestException } from "@nestjs/common";
 import type { PrismaService } from "@/prisma/prisma.service";
 import type { RabbitmqService } from "@/events/rabbitmq.service";
+import type { ExecutiveBriefService } from "./executive-brief.service";
 import { ReportsService } from "./reports.service";
 import type { ReportConfigDto } from "./dto/report-config.dto";
 
@@ -18,7 +19,7 @@ const base = {
 } as ReportConfigDto;
 
 describe("report filter boundaries", () => {
-  const service = new ReportsService({} as PrismaService, {} as RabbitmqService);
+  const service = new ReportsService({} as PrismaService, {} as RabbitmqService, {} as ExecutiveBriefService);
 
   it("rejects a reporting period for current-snapshot Compact reports", async () => {
     await expect(service.preview({ ...base, periods: ["q3-2025"] })).rejects.toBeInstanceOf(BadRequestException);

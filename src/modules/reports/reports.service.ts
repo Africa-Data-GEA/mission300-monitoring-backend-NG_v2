@@ -21,6 +21,8 @@ import {
 import type { ReportConfigDto } from "@/modules/reports/dto/report-config.dto";
 import type { ReportsQueryDto } from "@/modules/reports/dto/reports-query.dto";
 import { compareReportingValues } from "@/common/utils/reporting-period";
+import { ExecutiveBriefService } from "@/modules/reports/executive-brief.service";
+import { renderExecutiveBriefPdf } from "@/modules/reports/executive-brief-pdf";
 
 const DEFAULT_PAGE_SIZE = 10;
 
@@ -43,6 +45,7 @@ export class ReportsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly rabbitmq: RabbitmqService,
+    private readonly executiveBrief: ExecutiveBriefService,
   ) {}
 
   private async loadFilterOptions(): Promise<ReportFilterOptions> {
@@ -173,7 +176,7 @@ export class ReportsService {
     return this.buildPreview(dto, options);
   }
 
-  async generate(user: AuthenticatedUser, dto: ReportConfigDto) {
+  async generate(user: AuthenticatedUser, dto: ReportConfigDto, delivery: { notify?: boolean } = {}) {
     assertSupportedFilters(dto);
     const options = await this.loadFilterOptions();
     const fullPreview = await this.buildPreview(dto, options);
@@ -223,7 +226,7 @@ export class ReportsService {
 
     // The snapshot is ready synchronously; the client renders its PDF/XLSX
     // from these saved rows and metadata.
-    await this.rabbitmq.publish("report.ready", { reportId: saved.id });
+    if (delivery.notify !== false) await this.rabbitmq.publish("report.ready", { reportId: saved.id });
 
     return { preview, savedReport: toSavedReportResponse(saved) };
   }
@@ -235,6 +238,29 @@ export class ReportsService {
       throw new ConflictException("This report predates saved snapshots. Generate it again to create a reproducible version.");
     }
     return { preview: saved.previewSnapshot, orientation: saved.orientation };
+  }
+
+  async getSavedPdf(id: string) {
+    const saved = await this.prisma.savedReport.findUnique({ where: { id } });
+    if (!saved) throw new NotFoundException(`No saved report found with id ${id}`);
+    if (saved.reportType !== "EXECUTIVE_BRIEF") {
+      throw new BadRequestException("A server-rendered PDF is only available for executive briefs.");
+    }
+    if (!saved.previewSnapshot) {
+      throw new ConflictException("This report predates saved snapshots. Generate it again to create a reproducible version.");
+    }
+    const snapshot = saved.previewSnapshot as unknown as {
+      metadata: { title: string; reportingPeriod: string; generatedAt: string; limitations: string };
+      sections: { title: string; columns: string[]; rows: string[][] }[];
+    };
+    const buffer = await renderExecutiveBriefPdf({
+      title: snapshot.metadata.title,
+      reportingPeriod: snapshot.metadata.reportingPeriod,
+      generatedAt: snapshot.metadata.generatedAt,
+      limitations: snapshot.metadata.limitations,
+      sections: snapshot.sections,
+    });
+    return { buffer, fileName: saved.fileReference.replace(/\.[^.]+$/, "") + ".pdf" };
   }
 
   async deleteSaved(id: string) {
@@ -332,6 +358,8 @@ export class ReportsService {
         return [await this.complianceSection(config)];
       case "DATA_QUALITY":
         return [await this.dataQualitySection(config)];
+      case "EXECUTIVE_BRIEF":
+        return this.executiveBrief.sections(config);
     }
   }
 
@@ -593,9 +621,11 @@ const REPORT_FILTERS: Record<ReportType, readonly string[]> = {
   FINANCIAL: ["pillars", "programmeOrAgency"],
   SUBMISSION_COMPLIANCE: ["periods"],
   DATA_QUALITY: ["periods"],
+  EXECUTIVE_BRIEF: ["periods", "pillars"],
 };
 
 function reportingLabel(config: ReportConfigLike & { reportType: ReportType }, options: ReportFilterOptions): string {
+  if (config.reportType === "EXECUTIVE_BRIEF" && config.periods.includes("all")) return "Latest available";
   return REPORT_FILTERS[config.reportType].includes("periods")
     ? periodsLabel(config, options)
     : "Current snapshot";
@@ -653,6 +683,7 @@ function REPORT_TYPE_CATEGORY_OF(reportType: ReportType): string {
     FINANCIAL: "delivery",
     SUBMISSION_COMPLIANCE: "data-governance",
     DATA_QUALITY: "data-governance",
+    EXECUTIVE_BRIEF: "executive",
   };
   return category[reportType];
 }

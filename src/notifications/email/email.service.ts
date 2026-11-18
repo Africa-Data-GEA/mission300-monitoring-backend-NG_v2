@@ -2,10 +2,21 @@ import { Injectable, Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { Resend } from "resend";
 
+export interface EmailAttachment {
+  filename: string;
+  content: Buffer;
+}
+
 export interface SendEmailInput {
   to: string;
   subject: string;
   html: string;
+  attachments?: EmailAttachment[];
+}
+
+export interface SendEmailResult {
+  sent: boolean;
+  reason?: string;
 }
 
 /**
@@ -30,16 +41,24 @@ export class EmailService {
     }
   }
 
-  async send({ to, subject, html }: SendEmailInput): Promise<void> {
+  async send({ to, subject, html, attachments }: SendEmailInput): Promise<SendEmailResult> {
     if (!this.resend) {
       // Recovery/invitation URLs are credentials, including in development.
       this.logger.log("Email skipped: delivery provider is not configured");
-      return;
+      return { sent: false, reason: "Email delivery is not configured" };
     }
 
-    const { error } = await this.resend.emails.send({ from: this.from, to, subject, html });
+    const { error } = await this.resend.emails.send({
+      from: this.from,
+      to,
+      subject,
+      html,
+      ...(attachments?.length ? { attachments } : {}),
+    });
     if (error) {
       this.logger.error("Email provider rejected delivery");
+      return { sent: false, reason: "The email provider rejected the message" };
     }
+    return { sent: true };
   }
 }
