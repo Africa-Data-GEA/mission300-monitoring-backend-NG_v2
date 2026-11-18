@@ -184,7 +184,7 @@ const DATASETS: DatasetSpec[] = [
     id: "nerc-disco-allowed-tariffs",
     sheet: "Disco Allowed Tariffs",
     name: "DisCo Allowed Tariffs",
-    purpose: "The MYTO-approved allowed tariff per DisCo, behind the national cost-reflective tariff figure.",
+    purpose: "The MYTO-approved allowed tariff per DisCo, behind the national average allowed tariff figure.",
     frequency: "Annual",
     filedBy: "disco",
     pillarSlug: "financially-viable-utilities",

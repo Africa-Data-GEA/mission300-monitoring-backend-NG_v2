@@ -54,11 +54,11 @@ function approvedAtForYear(year: number): Date {
   return new Date(Date.UTC(year, 11, 31));
 }
 
-function readAllowedTariffs(workbook: ExcelJS.Workbook): Map<string, Map<number, number>> {
+function readAllowedTariffs(workbook: ExcelJS.Workbook): Map<number, number[]> {
   const sheet = workbook.getWorksheet("Disco Allowed Tariffs");
   if (!sheet) throw new Error('Sheet "Disco Allowed Tariffs" not found.');
 
-  const samples = new Map<string, Map<number, number[]>>();
+  const tariffsByYear = new Map<number, number[]>();
   const unknownDiscoNames = new Set<string>();
 
   sheet.eachRow((row, rowNumber) => {
@@ -68,29 +68,17 @@ function readAllowedTariffs(workbook: ExcelJS.Workbook): Map<string, Map<number,
     const tariff = cellNumber(row.getCell(4).value);
     if (!rawDisco || !year || !tariff) return;
 
-    const canonical = resolveDiscoName(rawDisco);
-    if (!canonical) {
+    if (!resolveDiscoName(rawDisco)) {
       unknownDiscoNames.add(rawDisco);
       return;
     }
-    const byYear = samples.get(canonical) ?? new Map<number, number[]>();
-    byYear.set(year, [...(byYear.get(year) ?? []), tariff]);
-    samples.set(canonical, byYear);
+    tariffsByYear.set(year, [...(tariffsByYear.get(year) ?? []), tariff]);
   });
 
   if (unknownDiscoNames.size > 0) {
     throw new Error(`Unrecognized DisCo name(s) in "Disco Allowed Tariffs": ${[...unknownDiscoNames].join(", ")}`);
   }
-
-  const byDisco = new Map<string, Map<number, number>>();
-  for (const [disco, byYear] of samples) {
-    const averaged = new Map<number, number>();
-    for (const [year, values] of byYear) {
-      averaged.set(year, values.reduce((sum, value) => sum + value, 0) / values.length);
-    }
-    byDisco.set(disco, averaged);
-  }
-  return byDisco;
+  return tariffsByYear;
 }
 
 async function main() {
@@ -98,8 +86,8 @@ async function main() {
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.readFile(WORKBOOK_PATH);
 
-  const tariffsByDiscoYear = readAllowedTariffs(workbook);
-  console.log(`Tariffs read for ${tariffsByDiscoYear.size} DisCos.`);
+  const tariffsByYear = readAllowedTariffs(workbook);
+  console.log(`Allowed tariffs read for ${tariffsByYear.size} year(s).`);
 
   const prisma = new PrismaClient({ adapter: new PrismaPg(process.env.DATABASE_URL as string) });
 
@@ -127,21 +115,9 @@ async function main() {
     );
   }
 
-  const years = new Set<number>();
-  for (const byYear of tariffsByDiscoYear.values()) {
-    for (const year of byYear.keys()) years.add(year);
-  }
-
   let backfilled = 0;
 
-  for (const year of [...years].sort((a, b) => a - b)) {
-    const tariffs: number[] = [];
-    for (const byYear of tariffsByDiscoYear.values()) {
-      const tariff = byYear.get(year);
-      if (tariff !== undefined) tariffs.push(tariff);
-    }
-    if (tariffs.length === 0) continue;
-
+  for (const [year, tariffs] of [...tariffsByYear].sort(([a], [b]) => a - b)) {
     const nationalTariff = tariffs.reduce((sum, value) => sum + value, 0) / tariffs.length;
     const period = String(year);
     const submissionId = `nerc-tariff-submission-${period}`;
@@ -157,7 +133,7 @@ async function main() {
         status: "APPROVED",
         sourceFileUrl: uploadedFile.storageKey,
         originalFileName: uploadedFile.originalName,
-        sourceReference: "Historical bulk import - Compiled NERC Data 2020-2026 (national average of per-DisCo allowed tariffs)",
+        sourceReference: "Historical bulk import - Compiled NERC Data 2020-2026 (average of the NERC MYTO allowed tariffs published for the year across all DisCos)",
         notes: "Backfilled by ingest-nerc-tariff-kpi.ts, not submitted through the live review queue.",
         reviewerId: adminId,
       },

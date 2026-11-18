@@ -953,7 +953,7 @@
   },
   {
     "code": "M300-P3-012",
-    "name": "Current Cost-Reflective Tariff",
+    "name": "Average Allowed Tariff",
     "pillar": "Financially Viable Utilities",
     "unit": "NGN/kWh",
     "declaredSourceInstitution": "NERC",
