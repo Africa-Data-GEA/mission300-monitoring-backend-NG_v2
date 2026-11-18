@@ -1,7 +1,8 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { ValidationStatus } from "@prisma/client";
 import { PrismaService } from "@/prisma/prisma.service";
 import { toKebabCase } from "@/common/utils/enum-casing";
+import { aggregateEnergy, billingEfficiencyOf, energyFiguresOf, type EnergyBasis, type EnergyRecordLike } from "@/common/kpi/energy-basis";
 import { formatPeriodLabel } from "@/modules/kpi-explorer/kpi-explorer.mappers";
 import {
   formatInt,
@@ -148,13 +149,11 @@ export class StateDiscoService {
    * aggregate shape getOverview's "current" uses, so the prior-period
    * comparison is computed identically to the current period rather than
    * by a second, easily-diverging copy of this logic. */
-  private aggregateNational(records: { activeCustomers: number; meteredCustomers: number; energyReceivedMwh: unknown; energyBilledMwh: unknown; revenueBilledNgn: unknown; revenueCollectedNgn: unknown; remittanceObligationNgn: unknown; remittanceActualNgn: unknown; allowedLossRatePercent: unknown }[]) {
+  private aggregateNational(records: (EnergyRecordLike & { activeCustomers: number; meteredCustomers: number; revenueBilledNgn: unknown; revenueCollectedNgn: unknown; remittanceObligationNgn: unknown; remittanceActualNgn: unknown; allowedLossRatePercent: unknown })[]) {
     const totals = records.reduce(
       (acc, r) => ({
         activeCustomers: acc.activeCustomers + r.activeCustomers,
         meteredCustomers: acc.meteredCustomers + r.meteredCustomers,
-        energyReceivedMwh: acc.energyReceivedMwh + Number(r.energyReceivedMwh),
-        energyBilledMwh: acc.energyBilledMwh + Number(r.energyBilledMwh),
         revenueBilledNgn: acc.revenueBilledNgn + Number(r.revenueBilledNgn),
         revenueCollectedNgn: acc.revenueCollectedNgn + Number(r.revenueCollectedNgn),
         remittanceObligationNgn: acc.remittanceObligationNgn + Number(r.remittanceObligationNgn),
@@ -166,8 +165,6 @@ export class StateDiscoService {
       {
         activeCustomers: 0,
         meteredCustomers: 0,
-        energyReceivedMwh: 0,
-        energyBilledMwh: 0,
         revenueBilledNgn: 0,
         revenueCollectedNgn: 0,
         remittanceObligationNgn: 0,
@@ -177,15 +174,19 @@ export class StateDiscoService {
       },
     );
     const { allowedLossRateSum, allowedLossRateCount, ...rest } = totals;
+    const energy = aggregateEnergy(records);
     const result = {
       ...rest,
+      energyBasis: energy.basis,
+      energyReceived: energy.received,
+      energyBilled: energy.billed,
       allowedLossRatePercent: allowedLossRateCount > 0 ? allowedLossRateSum / allowedLossRateCount : null,
       atccLossRatePercent: 0,
     };
-    const billingEfficiency = result.energyReceivedMwh > 0 ? result.energyBilledMwh / result.energyReceivedMwh : 0;
+    const billingEfficiency = billingEfficiencyOf(energy) ?? 0;
     const collectionEfficiency = result.revenueBilledNgn > 0 ? result.revenueCollectedNgn / result.revenueBilledNgn : 0;
     result.atccLossRatePercent =
-      result.energyReceivedMwh > 0 && result.revenueBilledNgn > 0
+      energy.received > 0 && result.revenueBilledNgn > 0
         ? (1 - billingEfficiency * collectionEfficiency) * 100
         : 0;
     return result;
@@ -259,7 +260,7 @@ export class StateDiscoService {
           meteringRate:
             totals.activeCustomers > 0 ? roundOne(ratio(totals.meteredCustomers, totals.activeCustomers)) : null,
           atccLossRate:
-            totals.energyReceivedMwh > 0 && totals.revenueBilledNgn > 0 ? roundOne(totals.atccLossRatePercent) : null,
+            totals.energyReceived > 0 && totals.revenueBilledNgn > 0 ? roundOne(totals.atccLossRatePercent) : null,
           collectionEfficiency:
             totals.revenueBilledNgn > 0 ? roundOne(ratio(totals.revenueCollectedNgn, totals.revenueBilledNgn)) : null,
           remittancePerformance:
@@ -289,8 +290,9 @@ export class StateDiscoService {
     let current: {
       activeCustomers: number;
       meteredCustomers: number;
-      energyReceivedMwh: number;
-      energyBilledMwh: number;
+      energyBasis: EnergyBasis;
+      energyReceived: number;
+      energyBilled: number;
       revenueBilledNgn: number;
       revenueCollectedNgn: number;
       remittanceObligationNgn: number;
@@ -333,8 +335,9 @@ export class StateDiscoService {
         current = {
           activeCustomers: 0,
           meteredCustomers: 0,
-          energyReceivedMwh: 0,
-          energyBilledMwh: 0,
+          energyBasis: "VOLUME",
+          energyReceived: 0,
+          energyBilled: 0,
           revenueBilledNgn: 0,
           revenueCollectedNgn: 0,
           remittanceObligationNgn: 0,
@@ -347,8 +350,9 @@ export class StateDiscoService {
         current = {
           activeCustomers: r.activeCustomers,
           meteredCustomers: r.meteredCustomers,
-          energyReceivedMwh: Number(r.energyReceivedMwh),
-          energyBilledMwh: Number(r.energyBilledMwh),
+          energyBasis: energyFiguresOf(r).basis,
+          energyReceived: energyFiguresOf(r).received,
+          energyBilled: energyFiguresOf(r).billed,
           revenueBilledNgn: Number(r.revenueBilledNgn),
           revenueCollectedNgn: Number(r.revenueCollectedNgn),
           remittanceObligationNgn: Number(r.remittanceObligationNgn),
@@ -361,8 +365,9 @@ export class StateDiscoService {
           previous = {
             activeCustomers: p.activeCustomers,
             meteredCustomers: p.meteredCustomers,
-            energyReceivedMwh: Number(p.energyReceivedMwh),
-            energyBilledMwh: Number(p.energyBilledMwh),
+            energyBasis: energyFiguresOf(p).basis,
+            energyReceived: energyFiguresOf(p).received,
+            energyBilled: energyFiguresOf(p).billed,
             revenueBilledNgn: Number(p.revenueBilledNgn),
             revenueCollectedNgn: Number(p.revenueCollectedNgn),
             remittanceObligationNgn: Number(p.remittanceObligationNgn),
@@ -562,11 +567,14 @@ export class StateDiscoService {
       validationLabel: r.validationLabel,
     }));
 
+    const energyBasis: EnergyBasis = baseRows.some((r) => r.energyBasis === "VALUE") ? "VALUE" : "VOLUME";
+
     return {
       meta: this.buildMeta(
         "Distribution Company comparison",
         "Customer, energy, revenue and remittance position ranked across Distribution Companies.",
       ),
+      energyBasis,
       rows,
     };
   }
@@ -578,6 +586,19 @@ export class StateDiscoService {
       throw new NotFoundException("This institution is not registered as a Distribution Company.");
     }
 
+    const hasVolume = (dto.energyReceivedMwh ?? 0) > 0 || (dto.energyBilledMwh ?? 0) > 0;
+    const hasValue = (dto.energyReceivedValueNgn ?? 0) > 0 || (dto.energyBilledValueNgn ?? 0) > 0;
+    if (hasVolume && hasValue) {
+      throw new BadRequestException("Report energy either as a volume (MWh) or as a value (NGN), not both.");
+    }
+    const energy = {
+      energyBasis: hasValue ? ("VALUE" as const) : ("VOLUME" as const),
+      energyReceivedMwh: dto.energyReceivedMwh ?? 0,
+      energyBilledMwh: dto.energyBilledMwh ?? 0,
+      energyReceivedValueNgn: dto.energyReceivedValueNgn ?? 0,
+      energyBilledValueNgn: dto.energyBilledValueNgn ?? 0,
+    };
+
     const record = await this.prisma.discoPerformanceRecord.upsert({
       where: { institutionId_period: { institutionId, period: dto.period } },
       create: {
@@ -585,8 +606,7 @@ export class StateDiscoService {
         period: dto.period,
         activeCustomers: dto.activeCustomers,
         meteredCustomers: dto.meteredCustomers,
-        energyReceivedMwh: dto.energyReceivedMwh,
-        energyBilledMwh: dto.energyBilledMwh,
+        ...energy,
         revenueBilledNgn: dto.revenueBilledNgn,
         revenueCollectedNgn: dto.revenueCollectedNgn,
         remittanceObligationNgn: dto.remittanceObligationNgn,
@@ -598,8 +618,7 @@ export class StateDiscoService {
       update: {
         activeCustomers: dto.activeCustomers,
         meteredCustomers: dto.meteredCustomers,
-        energyReceivedMwh: dto.energyReceivedMwh,
-        energyBilledMwh: dto.energyBilledMwh,
+        ...energy,
         revenueBilledNgn: dto.revenueBilledNgn,
         revenueCollectedNgn: dto.revenueCollectedNgn,
         remittanceObligationNgn: dto.remittanceObligationNgn,

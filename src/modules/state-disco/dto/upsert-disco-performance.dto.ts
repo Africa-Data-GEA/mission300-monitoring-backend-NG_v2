@@ -23,13 +23,25 @@ export class UpsertDiscoPerformanceDto {
   @Min(0)
   meteredCustomers!: number;
 
+  @IsOptional()
   @IsNumber()
   @Min(0)
-  energyReceivedMwh!: number;
+  energyReceivedMwh?: number;
 
+  @IsOptional()
   @IsNumber()
   @Min(0)
-  energyBilledMwh!: number;
+  energyBilledMwh?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  energyReceivedValueNgn?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  energyBilledValueNgn?: number;
 
   @IsNumber()
   @Min(0)

@@ -12,7 +12,8 @@ import {
 } from "./lib/disco-institutions";
 import { quarterEndCustomerStocks, type MeteringRow } from "./lib/nerc-customer-stocks";
 import { findScaleBreaks, parseAcceptedScaleBreaks } from "./lib/scale-break";
-import { addMonth, commonMonths, coverageNoteFor, quarterOfMonth } from "./lib/period-coverage";
+import { addMonth, commonMonths, coverageNoteFor, MONTHS, quarterOfMonth } from "./lib/period-coverage";
+import { billingEfficiencyOf, energyBasisForMonth, valueBasisStart, type EnergyBasis } from "./lib/energy-basis";
 
 /**
  * One-off historical backfill of DisCo performance data (2020-2026) from
@@ -36,17 +37,6 @@ function periodOf(year: number, monthName: string): string {
   const quarter = MONTH_TO_QUARTER[monthName];
   if (!quarter) throw new Error(`Unrecognized month name "${monthName}"`);
   return `q${quarter}-${year}`;
-}
-
-const LAST_RELIABLE_PERIOD = "q2-2025";
-
-function periodOrder(period: string): number {
-  const match = /^q([1-4])-(\d{4})$/.exec(period);
-  return match ? Number(match[2]) * 4 + Number(match[1]) : 0;
-}
-
-function afterCutoff(period: string): boolean {
-  return periodOrder(period) > periodOrder(LAST_RELIABLE_PERIOD);
 }
 
 function cellString(value: ExcelJS.CellValue): string {
@@ -124,6 +114,8 @@ interface QuarterAccumulator {
   period: string;
   energyReceivedGwh: number;
   energyBilledGwh: number;
+  energyReceivedValueBillionNgn: number;
+  energyBilledValueBillionNgn: number;
   revenueBilledMillionNgn: number;
   revenueCollectedMillionNgn: number;
   moInvoiceBillionNgn: number;
@@ -140,6 +132,8 @@ function newAccumulator(disco: string, period: string): QuarterAccumulator {
     period,
     energyReceivedGwh: 0,
     energyBilledGwh: 0,
+    energyReceivedValueBillionNgn: 0,
+    energyBilledValueBillionNgn: 0,
     revenueBilledMillionNgn: 0,
     revenueCollectedMillionNgn: 0,
     moInvoiceBillionNgn: 0,
@@ -188,18 +182,18 @@ async function main() {
   const accumulators = new Map<string, QuarterAccumulator>();
   const unknownDiscoNames = new Set<string>();
 
-  function accumulate(
-    rows: MonthlyRow[],
-    field: keyof Omit<QuarterAccumulator, "disco" | "period">,
-  ) {
+  type AccumulatorField = keyof Omit<QuarterAccumulator, "disco" | "period">;
+  const valueStart = valueBasisStart();
+
+  function accumulate(rows: MonthlyRow[], target: AccumulatorField | ((row: MonthlyRow) => AccumulatorField)) {
     for (const row of rows) {
+      const field = typeof target === "function" ? target(row) : target;
       const canonicalDisco = resolveDiscoName(row.disco);
       if (!canonicalDisco) {
         unknownDiscoNames.add(row.disco);
         continue;
       }
       const period = periodOf(row.year, row.month);
-      if (afterCutoff(period)) continue;
       const key = `${canonicalDisco}|${period}`;
       const acc = accumulators.get(key) ?? newAccumulator(canonicalDisco, period);
       acc[field] += row.value;
@@ -207,8 +201,12 @@ async function main() {
     }
   }
 
-  accumulate(energyReceived, "energyReceivedGwh");
-  accumulate(energyBilled, "energyBilledGwh");
+  const energyFieldFor = (volume: AccumulatorField, value: AccumulatorField) => (row: MonthlyRow): AccumulatorField => {
+    const basis: EnergyBasis = energyBasisForMonth(row.year, MONTHS.indexOf(row.month as (typeof MONTHS)[number]) + 1, valueStart);
+    return basis === "VALUE" ? value : volume;
+  };
+  accumulate(energyReceived, energyFieldFor("energyReceivedGwh", "energyReceivedValueBillionNgn"));
+  accumulate(energyBilled, energyFieldFor("energyBilledGwh", "energyBilledValueBillionNgn"));
   accumulate(revenueBilled, "revenueBilledMillionNgn");
   accumulate(revenueCollected, "revenueCollectedMillionNgn");
   accumulate(moInvoice, "moInvoiceBillionNgn");
@@ -217,7 +215,6 @@ async function main() {
   accumulate(nbetRemittance, "nbetRemittanceBillionNgn");
 
   for (const [period, snapshot] of customerStocks) {
-    if (afterCutoff(period)) continue;
     for (const [rawDisco, stock] of snapshot.byDisco) {
       const canonicalDisco = resolveDiscoName(rawDisco);
       if (!canonicalDisco) {
@@ -327,26 +324,44 @@ async function main() {
     const institutionId = institutionsBySlug.get(acc.disco);
     if (!institutionId) continue;
 
+    const hasValue = acc.energyReceivedValueBillionNgn > 0 || acc.energyBilledValueBillionNgn > 0;
+    const hasVolume = acc.energyReceivedGwh > 0 || acc.energyBilledGwh > 0;
+    if (hasValue && hasVolume) {
+      throw new Error(
+        `${acc.disco} ${acc.period} mixes energy volumes and energy values within one quarter. ` +
+          `Set NERC_ENERGY_VALUE_FROM to a quarter start (YYYY-01, YYYY-04, YYYY-07 or YYYY-10).`,
+      );
+    }
+    const energyBasis: EnergyBasis = hasValue ? "VALUE" : "VOLUME";
     const energyReceivedMwh = acc.energyReceivedGwh * 1000;
     const energyBilledMwh = acc.energyBilledGwh * 1000;
+    const energyReceivedValueNgn = acc.energyReceivedValueBillionNgn * 1_000_000_000;
+    const energyBilledValueNgn = acc.energyBilledValueBillionNgn * 1_000_000_000;
+    const energy =
+      energyBasis === "VALUE"
+        ? { received: energyReceivedValueNgn, billed: energyBilledValueNgn }
+        : { received: energyReceivedMwh, billed: energyBilledMwh };
     const revenueBilledNgn = acc.revenueBilledMillionNgn * 1_000_000;
     const revenueCollectedNgn = acc.revenueCollectedMillionNgn * 1_000_000;
 
     // ATC&C = [1 - (billing efficiency x collection efficiency)] x 100.
     // Energy received minus energy billed alone captures only the technical
     // and commercial half; the collection half is the revenue ratio.
-    const billingEfficiency = energyReceivedMwh > 0 ? energyBilledMwh / energyReceivedMwh : 0;
+    const billingEfficiency = billingEfficiencyOf(energy) ?? 0;
     const collectionEfficiency = revenueBilledNgn > 0 ? revenueCollectedNgn / revenueBilledNgn : 0;
     const atccLossRatePercent =
-      energyReceivedMwh > 0 && revenueBilledNgn > 0
+      energy.received > 0 && revenueBilledNgn > 0
         ? (1 - billingEfficiency * collectionEfficiency) * 100
         : 0;
 
     const data = {
       activeCustomers: acc.meteredCustomers + acc.unmeteredCustomers,
       meteredCustomers: acc.meteredCustomers,
+      energyBasis,
       energyReceivedMwh,
       energyBilledMwh,
+      energyReceivedValueNgn,
+      energyBilledValueNgn,
       revenueBilledNgn,
       revenueCollectedNgn,
       remittanceObligationNgn: (acc.moInvoiceBillionNgn + acc.nbetInvoiceBillionNgn) * 1_000_000_000,

@@ -2,6 +2,7 @@ import { join } from "node:path";
 import ExcelJS from "exceljs";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@prisma/client";
+import { aggregateEnergy, billingEfficiencyOf, type EnergyRecordLike } from "./lib/energy-basis";
 
 /**
  * One-off historical backfill of 4 national-rollup KPIs from real NERC data
@@ -246,8 +247,7 @@ async function main() {
     {
       activeCustomers: number;
       meteredCustomers: number;
-      energyReceivedMwh: number;
-      energyBilledMwh: number;
+      energyRecords: EnergyRecordLike[];
       revenueBilledNgn: number;
       revenueCollectedNgn: number;
       remittanceObligationNgn: number;
@@ -266,8 +266,7 @@ async function main() {
     const totals = byPeriod.get(record.period) ?? {
       activeCustomers: 0,
       meteredCustomers: 0,
-      energyReceivedMwh: 0,
-      energyBilledMwh: 0,
+      energyRecords: [],
       revenueBilledNgn: 0,
       revenueCollectedNgn: 0,
       remittanceObligationNgn: 0,
@@ -275,8 +274,7 @@ async function main() {
     };
     totals.activeCustomers += record.activeCustomers;
     totals.meteredCustomers += record.meteredCustomers;
-    totals.energyReceivedMwh += Number(record.energyReceivedMwh);
-    totals.energyBilledMwh += Number(record.energyBilledMwh);
+    totals.energyRecords.push(record);
     totals.revenueBilledNgn += Number(record.revenueBilledNgn);
     totals.revenueCollectedNgn += Number(record.revenueCollectedNgn);
     totals.remittanceObligationNgn += Number(record.remittanceObligationNgn);
@@ -317,9 +315,10 @@ async function main() {
       count++;
     }
 
-    if (totals.energyReceivedMwh > 0 && totals.revenueBilledNgn > 0) {
+    const energy = aggregateEnergy(totals.energyRecords);
+    if (energy.received > 0 && totals.revenueBilledNgn > 0) {
       // ATC&C = [1 - (billing efficiency x collection efficiency)] x 100.
-      const billingEfficiency = totals.energyBilledMwh / totals.energyReceivedMwh;
+      const billingEfficiency = billingEfficiencyOf(energy) ?? 0;
       const collectionEfficiency = totals.revenueCollectedNgn / totals.revenueBilledNgn;
       const atccLossRate = (1 - billingEfficiency * collectionEfficiency) * 100;
       await backfillOne(

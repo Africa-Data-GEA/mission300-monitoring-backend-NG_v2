@@ -660,6 +660,11 @@ enum RegisterPriority {
 // Unlike KPI Explorer's own validationStatus (always derived from a
 // Submission), this one is a genuinely stored field here - there is no
 // submission/approval pipeline behind Programs records.
+enum EnergyBasis {
+  VOLUME
+  VALUE
+}
+
 enum ValidationStatus {
   CONFIRMED
   PUBLIC_SOURCE
@@ -1203,8 +1208,11 @@ model DiscoPerformanceRecord {
   period                  String
   activeCustomers         Int
   meteredCustomers        Int
-  energyReceivedMwh       Decimal
-  energyBilledMwh         Decimal
+  energyBasis             EnergyBasis      @default(VOLUME)
+  energyReceivedMwh       Decimal          @default(0)
+  energyBilledMwh         Decimal          @default(0)
+  energyReceivedValueNgn  Decimal          @default(0)
+  energyBilledValueNgn    Decimal          @default(0)
   revenueBilledNgn        Decimal
   revenueCollectedNgn     Decimal
   remittanceObligationNgn Decimal

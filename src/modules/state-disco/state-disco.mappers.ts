@@ -7,6 +7,7 @@ import type {
 } from "@prisma/client";
 import { toKebabCase } from "@/common/utils/enum-casing";
 import { formatPeriodLabel } from "@/modules/kpi-explorer/kpi-explorer.mappers";
+import { energyFiguresOf } from "@/common/kpi/energy-basis";
 
 /**
  * State/DisCo is NOT a read-composition layer like Executive Overview or
@@ -95,7 +96,9 @@ type RemittanceSource = Pick<DiscoPerformanceRecord, "period" | "remittanceOblig
 
 export function toDiscoComparisonRowBase(record: RecordWithInstitution, remittanceSource: RemittanceSource = record) {
   const meteringRate = ratio(record.meteredCustomers, record.activeCustomers);
-  const billingEfficiency = ratio(toNumber(record.energyBilledMwh), toNumber(record.energyReceivedMwh));
+  const energy = energyFiguresOf(record);
+  const billingEfficiency = ratio(energy.billed, energy.received);
+  const formatEnergy = energy.basis === "VALUE" ? formatNgnBillions : formatMwh;
   const collectionEfficiency = ratio(toNumber(record.revenueCollectedNgn), toNumber(record.revenueBilledNgn));
   const remittanceObligationNgn = toNumber(remittanceSource.remittanceObligationNgn);
   const remittancePerformance = ratio(toNumber(remittanceSource.remittanceActualNgn), remittanceObligationNgn);
@@ -116,10 +119,11 @@ export function toDiscoComparisonRowBase(record: RecordWithInstitution, remittan
     unmeteredCustomers: formatInt(record.activeCustomers - record.meteredCustomers),
     meteringRate: formatPercent(meteringRate),
     meteringRateValue: meteringRate,
-    energyReceived: formatMwh(toNumber(record.energyReceivedMwh)),
-    energyReceivedValue: toNumber(record.energyReceivedMwh),
-    energyBilled: formatMwh(toNumber(record.energyBilledMwh)),
-    energyBilledValue: toNumber(record.energyBilledMwh),
+    energyBasis: energy.basis,
+    energyReceived: formatEnergy(energy.received),
+    energyReceivedValue: energy.received,
+    energyBilled: formatEnergy(energy.billed),
+    energyBilledValue: energy.billed,
     billingEfficiency: formatPercent(billingEfficiency),
     revenueBilled: formatNgnBillions(toNumber(record.revenueBilledNgn)),
     revenueBilledValue: toNumber(record.revenueBilledNgn),
