@@ -20,7 +20,7 @@ import {
 } from "@/modules/reports/reports.mappers";
 import type { ReportConfigDto } from "@/modules/reports/dto/report-config.dto";
 import type { ReportsQueryDto } from "@/modules/reports/dto/reports-query.dto";
-import { compareReportingValues } from "@/common/utils/reporting-period";
+import { compareReportingValues, withoutFuturePeriods } from "@/common/utils/reporting-period";
 import { ExecutiveBriefService } from "@/modules/reports/executive-brief.service";
 import { renderExecutiveBriefPdf } from "@/modules/reports/executive-brief-pdf";
 
@@ -70,7 +70,7 @@ export class ReportsService {
     return {
       reportingPeriods: withAll(
         "periods",
-        [...new Set(periods.map((p) => p.period))]
+        [...new Set(withoutFuturePeriods(periods).map((p) => p.period))]
           .sort()
           .map((p) => ({ value: p, label: formatPeriodLabel(p) })),
       ),

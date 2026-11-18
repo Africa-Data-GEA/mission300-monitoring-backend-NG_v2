@@ -2,6 +2,7 @@ import { Injectable } from "@nestjs/common";
 import { PrismaService } from "@/prisma/prisma.service";
 import { formatPeriodLabel } from "@/modules/kpi-explorer/kpi-explorer.mappers";
 import { DISCO_CANONICAL_NAMES } from "@/modules/data-submissions/disco-institutions";
+import { withoutFuturePeriods } from "@/common/utils/reporting-period";
 
 // Matches dashboardFilterOptionsSchema (m300-frontend/src/api/schemas/
 // filters.ts) exactly - the application-wide filter bar in the shell, not
@@ -46,7 +47,7 @@ export class FiltersService {
       // but the label spells out "Full Year" so "2025" next to "Q4 2025"
       // reads as two different things, not a mistake.
       reportingPeriods: [
-        ...sortPeriodsDescending(periods.map((p) => p.period)).map((period) => ({
+        ...sortPeriodsDescending(withoutFuturePeriods(periods).map((p) => p.period)).map((period) => ({
           value: period,
           label: /^\d{4}$/.test(period.trim()) ? `${period.trim()} (Full Year)` : formatPeriodLabel(period),
         })),

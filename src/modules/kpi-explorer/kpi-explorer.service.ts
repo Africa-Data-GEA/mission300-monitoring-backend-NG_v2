@@ -91,7 +91,7 @@ export class KpiExplorerService {
       ),
       reportingPeriods: withAll(
         "periods",
-        [...new Set(periods.map((p) => p.period))]
+        [...new Set(withoutFuturePeriods(periods).map((p) => p.period))]
           .sort()
           .map((p) => ({ value: p, label: formatPeriodLabel(p) })),
       ),
