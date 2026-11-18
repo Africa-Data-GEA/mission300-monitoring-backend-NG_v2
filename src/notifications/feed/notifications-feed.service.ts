@@ -3,6 +3,12 @@ import { PrismaService } from "@/prisma/prisma.service";
 
 const LIST_LIMIT = 20;
 
+export const AWAITING_REVIEW_TITLE = "Submission awaiting review";
+
+export function awaitingReviewLink(submissionId: string) {
+  return `/data-submissions/validation/${submissionId}`;
+}
+
 @Injectable()
 export class NotificationsFeedService {
   constructor(private readonly prisma: PrismaService) {}
@@ -31,6 +37,14 @@ export class NotificationsFeedService {
     const { count } = await this.prisma.notification.updateMany({
       where: { userId, read: false },
       data: { read: true },
+    });
+    return { count };
+  }
+
+  async resolveAwaitingReview(submissionId: string, title: string, description: string) {
+    const { count } = await this.prisma.notification.updateMany({
+      where: { title: AWAITING_REVIEW_TITLE, link: awaitingReviewLink(submissionId) },
+      data: { title, description, read: true },
     });
     return { count };
   }

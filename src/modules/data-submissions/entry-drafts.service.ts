@@ -16,6 +16,14 @@ export interface EntryDraftView {
     savedAt: string;
     savedBy: string;
   } | null;
+  returned: {
+    values: Record<string, string>;
+    sourceReference: string;
+    notes: string;
+    comment: string;
+    returnedAt: string;
+    version: number;
+  } | null;
 }
 
 export function hasDraftContent(dto: ManualEntryDto): boolean {
@@ -39,7 +47,7 @@ export class EntryDraftsService {
       where: { obligationId },
       include: { savedBy: { select: { fullName: true } } },
     });
-    if (!saved) return { draft: null };
+    if (!saved) return { draft: null, returned: await this.latestReturned(obligationId) };
     const payload = saved.payload as Prisma.JsonObject;
     return {
       draft: {
@@ -50,6 +58,40 @@ export class EntryDraftsService {
         savedAt: saved.updatedAt.toISOString(),
         savedBy: saved.savedBy.fullName,
       },
+      returned: null,
+    };
+  }
+
+  private async latestReturned(obligationId: string): Promise<EntryDraftView["returned"]> {
+    const latest = await this.prisma.submission.findFirst({
+      where: { obligationId },
+      orderBy: { version: "desc" },
+      include: {
+        items: true,
+        reviewDecisions: { orderBy: { createdAt: "desc" }, take: 1 },
+        obligation: { include: { dataset: { include: { fields: true } } } },
+      },
+    });
+    if (!latest || latest.status !== "RETURNED" || latest.method !== "MANUAL_ENTRY") return null;
+    const dataset = latest.obligation?.dataset;
+    if (!dataset || dataset.submissionMode === "NERC_CONSOLIDATED") return null;
+
+    const valueByKpi = new Map(
+      latest.items.filter((item) => item.period === latest.obligation?.reportingPeriod).map((item) => [item.kpiDefinitionId, item.value.toString()]),
+    );
+    const values: Record<string, string> = {};
+    for (const field of dataset.fields) {
+      const value = field.kpiDefinitionId ? valueByKpi.get(field.kpiDefinitionId) : undefined;
+      if (value !== undefined) values[field.id] = value;
+    }
+    const decision = latest.reviewDecisions[0];
+    return {
+      values,
+      sourceReference: latest.sourceReference ?? "",
+      notes: latest.notes ?? "",
+      comment: decision?.comment ?? "",
+      returnedAt: (decision?.createdAt ?? latest.createdAt).toISOString(),
+      version: latest.version,
     };
   }
 

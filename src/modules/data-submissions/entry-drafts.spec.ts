@@ -5,13 +5,44 @@ import { EntryDraftsService, hasDraftContent } from "@/modules/data-submissions/
 const provider = (institutionId: string) =>
   ({ id: "u1", role: "INSTITUTIONAL_DATA_PROVIDER", roles: [], institutionId }) as unknown as AuthenticatedUser;
 
-function build(stored: { payload: unknown; updatedAt: Date; savedBy: { fullName: string } } | null = null) {
+const returnedSubmission = (overrides: Record<string, unknown> = {}) => ({
+  version: 3,
+  status: "RETURNED",
+  method: "MANUAL_ENTRY",
+  sourceReference: "Q3 return",
+  notes: "first attempt",
+  createdAt: new Date("2026-10-20T09:00:00Z"),
+  items: [
+    { kpiDefinitionId: "kpi-1", period: "Q3 2026", value: { toString: () => "61.7" } },
+    { kpiDefinitionId: "kpi-2", period: "Q3 2026", value: { toString: () => "12" } },
+    { kpiDefinitionId: "kpi-1", period: "Q2 2026", value: { toString: () => "99" } },
+  ],
+  reviewDecisions: [{ comment: "Check the capacity figure.", createdAt: new Date("2026-10-21T10:00:00Z") }],
+  obligation: {
+    reportingPeriod: "Q3 2026",
+    dataset: {
+      submissionMode: "PER_INSTITUTION",
+      fields: [
+        { id: "f1", kpiDefinitionId: "kpi-1" },
+        { id: "f2", kpiDefinitionId: "kpi-2" },
+        { id: "f3", kpiDefinitionId: null },
+      ],
+    },
+  },
+  ...overrides,
+});
+
+function build(
+  stored: { payload: unknown; updatedAt: Date; savedBy: { fullName: string } } | null = null,
+  latest: Record<string, unknown> | null = null,
+) {
   const prisma = {
     obligation: {
       findUnique: jest.fn(async ({ where }: { where: { id: string } }) =>
         where.id === "obl-1" ? { institutionId: "inst-a" } : null,
       ),
     },
+    submission: { findFirst: jest.fn().mockResolvedValue(latest) },
     entryDraft: {
       findUnique: jest.fn().mockResolvedValue(stored),
       upsert: jest.fn(async () => ({ updatedAt: new Date("2026-10-23T10:00:00Z") })),
@@ -69,7 +100,46 @@ describe("EntryDraftsService", () => {
 
   it("returns no draft when none was saved", async () => {
     const { service } = build();
-    expect(await service.get(provider("inst-a"), "obl-1")).toEqual({ draft: null });
+    expect(await service.get(provider("inst-a"), "obl-1")).toEqual({ draft: null, returned: null });
+  });
+
+  it("returns the values and reviewer comment of a returned manual entry", async () => {
+    const { service } = build(null, returnedSubmission());
+    const { draft, returned } = await service.get(provider("inst-a"), "obl-1");
+    expect(draft).toBeNull();
+    expect(returned).toEqual({
+      values: { f1: "61.7", f2: "12" },
+      sourceReference: "Q3 return",
+      notes: "first attempt",
+      comment: "Check the capacity figure.",
+      returnedAt: "2026-10-21T10:00:00.000Z",
+      version: 3,
+    });
+  });
+
+  it("does not pre-fill from a submission that was not returned or was not manual entry", async () => {
+    const approved = build(null, returnedSubmission({ status: "APPROVED" }));
+    expect((await approved.service.get(provider("inst-a"), "obl-1")).returned).toBeNull();
+    const uploaded = build(null, returnedSubmission({ method: "UPLOAD" }));
+    expect((await uploaded.service.get(provider("inst-a"), "obl-1")).returned).toBeNull();
+  });
+
+  it("does not pre-fill consolidated datasets", async () => {
+    const latest = returnedSubmission();
+    (latest.obligation as { dataset: { submissionMode: string } }).dataset.submissionMode = "NERC_CONSOLIDATED";
+    const { service } = build(null, latest);
+    expect((await service.get(provider("inst-a"), "obl-1")).returned).toBeNull();
+  });
+
+  it("prefers a saved draft over the returned values", async () => {
+    const { prisma, service } = build(
+      { payload: { values: { f1: "1" }, rows: null, sourceReference: "", notes: "" }, updatedAt: new Date(), savedBy: { fullName: "Seed" } },
+      returnedSubmission(),
+    );
+    const result = await service.get(provider("inst-a"), "obl-1");
+    expect(result.draft).not.toBeNull();
+    expect(result.returned).toBeNull();
+    expect(prisma.submission.findFirst).not.toHaveBeenCalled();
   });
 
   it("keeps another institution out of the draft", async () => {

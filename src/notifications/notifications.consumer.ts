@@ -13,7 +13,11 @@ import {
 } from "@/notifications/email/templates";
 import { BrandingService } from "@/modules/administration/branding/branding.service";
 import { REPORT_TYPE_LABELS } from "@/modules/reports/reports.mappers";
-import { NotificationsFeedService } from "@/notifications/feed/notifications-feed.service";
+import {
+  AWAITING_REVIEW_TITLE,
+  awaitingReviewLink,
+  NotificationsFeedService,
+} from "@/notifications/feed/notifications-feed.service";
 
 /**
  * Single subscriber for every notification-worthy domain event, fanning
@@ -21,6 +25,13 @@ import { NotificationsFeedService } from "@/notifications/feed/notifications-fee
  * notification later means one more `case`, not new plumbing - both
  * channels already run off this one RabbitMQ subscription.
  */
+const DECISION_PHRASES: Record<string, string> = {
+  APPROVE: "approved",
+  PROVISIONALLY_APPROVE: "provisionally approved",
+  RETURN_FOR_CORRECTION: "returned for correction",
+  REJECT: "rejected",
+};
+
 @Injectable()
 export class NotificationsConsumer implements OnModuleInit {
   private readonly logger = new Logger(NotificationsConsumer.name);
@@ -93,11 +104,17 @@ export class NotificationsConsumer implements OnModuleInit {
       await this.getEmailBrand(),
     );
     await this.email.send({ to: submission.submittedBy.email, subject, html });
+    const phrase = DECISION_PHRASES[latestDecision.decision] ?? latestDecision.decision.toLowerCase();
     await this.feed.create(
       submission.submittedBy.id,
-      `Submission ${latestDecision.decision.toLowerCase()}`,
-      `Your ${submission.institution.name} submission was ${latestDecision.decision.toLowerCase()}.`,
+      `Submission ${phrase}`,
+      `Your ${submission.institution.name} submission was ${phrase}.`,
       "/data-submissions/submissions",
+    );
+    await this.feed.resolveAwaitingReview(
+      submission.id,
+      `Submission ${phrase}`,
+      `${submission.institution.name} submission was ${phrase}.`,
     );
   }
 
@@ -176,9 +193,9 @@ export class NotificationsConsumer implements OnModuleInit {
     );
     await this.feed.createMany(
       reviewers.map((reviewer) => reviewer.id),
-      "Submission awaiting review",
+      AWAITING_REVIEW_TITLE,
       `${submission.institution.name} submitted ${submission.obligation.dataset.name} (${submission.obligation.reportingPeriod}).`,
-      `/data-submissions/validation/${submission.id}`,
+      awaitingReviewLink(submission.id),
     );
   }
 
