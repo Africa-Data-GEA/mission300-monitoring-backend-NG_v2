@@ -161,6 +161,7 @@ async function main() {
 
   const byQuarter = new Map<string, QuarterTotals>();
   const unclassifiedCompanies = new Set<string>();
+  const unnamedRows: { row: number; period: string; kwh: number }[] = [];
 
   const gencoSheet = workbook.getWorksheet("Genco Energy Export");
   if (!gencoSheet) throw new Error('Sheet "Genco Energy Export" not found.');
@@ -171,6 +172,7 @@ async function main() {
     const month = cellText(row.getCell(3).value);
     const kwh = Number(row.getCell(4).value) || 0;
     const quarter = MONTH_TO_QUARTER[month];
+    if (!company && year && quarter && kwh > 0) unnamedRows.push({ row: rowNumber, period: `q${quarter}-${year}`, kwh });
     if (!company || !year || !quarter) return;
 
     const period = `q${quarter}-${year}`;
@@ -213,6 +215,12 @@ async function main() {
       totals.hydroKwh += kwh;
       byQuarter.set(period, totals);
     });
+  }
+
+  for (const skipped of unnamedRows) {
+    console.warn(
+      `Skipped Genco Energy Export row ${skipped.row} (${skipped.period}): ${(skipped.kwh / 1e6).toFixed(2)} GWh has no company name, so it is not counted.`,
+    );
   }
 
   const grandTotal = [...byQuarter.values()].reduce((sum, t) => sum + t.totalKwh, 0);

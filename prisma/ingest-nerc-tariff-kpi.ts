@@ -3,33 +3,6 @@ import ExcelJS from "exceljs";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@prisma/client";
 
-/**
- * One-off historical backfill of M300-P3-012 ("Current Cost-Reflective
- * Tariff") from the "Disco Allowed Tariffs" sheet in the same compiled
- * NERC workbook the other two backfills use.
- *
- * That sheet gives ONE blended tariff per DisCo per YEAR (no per-band
- * breakdown - confirmed the Month column is always "NULL", so this is
- * annual, not monthly), which doesn't map to DiscoServiceBand (needs
- * tariff AND customer-share split by service band A-E, neither of which
- * this sheet has). Rather than force it into that shape - which would
- * mean inventing a customer-distribution-per-band number with no real
- * source - this rolls the per-DisCo figures up into the one real KPI that
- * already exists for a national tariff figure, weighted by each DisCo's
- * real active-customer count for that year (from DiscoPerformanceRecord,
- * already ingested by ingest-nerc-disco-data.ts - this script depends on
- * that having run first and fails clearly if it hasn't).
- *
- * Same KpiValue-via-Submission-chain approach as
- * ingest-nerc-genco-kpis.ts (see that file's header comment for why a
- * KpiValue can't just be written directly) - reuses the same "NISO / TCN"
- * pattern but attributes this data to NERC itself, since MYTO tariff
- * orders are NERC's own determination, not a generation-side figure.
- *
- * Run with: DATABASE_URL=... node dist/prisma/ingest-nerc-tariff-kpi.js
- * (after ingest-nerc-disco-data.js has already run against the same DB)
- */
-
 const WORKBOOK_PATH = join(process.cwd(), "prisma", "data", "nerc-disco-data-2020-2026.xlsx");
 
 const NERC_INSTITUTION_ID = "seed-institution-nerc";
@@ -37,10 +10,6 @@ const NERC_INSTITUTION_NAME = "Nigerian Electricity Regulatory Commission (NERC)
 
 const TARIFF_KPI_CODE = "M300-P3-012";
 
-// Same normalization table as ingest-nerc-disco-data.ts (duplicated
-// deliberately - these are small, stable, standalone one-off scripts, not
-// shared application code, so copying ~15 lines is lower-risk than
-// coupling them together).
 const DISCO_NAME_MAP: Record<string, string> = {
   Aba: "Aba Power Limited",
   Abuja: "Abuja Electricity Distribution Company",
@@ -85,14 +54,11 @@ function approvedAtForYear(year: number): Date {
   return new Date(Date.UTC(year, 11, 31));
 }
 
-/** Reads "Disco Allowed Tariffs" (Disco, Year, Month["NULL" always],
- * AllowedTariffs_N_kWh) into a per-DisCo-per-year map, deduped by
- * (normalized name, year) the same way the other sheets are. */
 function readAllowedTariffs(workbook: ExcelJS.Workbook): Map<string, Map<number, number>> {
   const sheet = workbook.getWorksheet("Disco Allowed Tariffs");
   if (!sheet) throw new Error('Sheet "Disco Allowed Tariffs" not found.');
 
-  const byDisco = new Map<string, Map<number, number>>();
+  const samples = new Map<string, Map<number, number[]>>();
   const unknownDiscoNames = new Set<string>();
 
   sheet.eachRow((row, rowNumber) => {
@@ -107,13 +73,22 @@ function readAllowedTariffs(workbook: ExcelJS.Workbook): Map<string, Map<number,
       unknownDiscoNames.add(rawDisco);
       return;
     }
-    const byYear = byDisco.get(canonical) ?? new Map<number, number>();
-    if (!byYear.has(year)) byYear.set(year, tariff);
-    byDisco.set(canonical, byYear);
+    const byYear = samples.get(canonical) ?? new Map<number, number[]>();
+    byYear.set(year, [...(byYear.get(year) ?? []), tariff]);
+    samples.set(canonical, byYear);
   });
 
   if (unknownDiscoNames.size > 0) {
     throw new Error(`Unrecognized DisCo name(s) in "Disco Allowed Tariffs": ${[...unknownDiscoNames].join(", ")}`);
+  }
+
+  const byDisco = new Map<string, Map<number, number>>();
+  for (const [disco, byYear] of samples) {
+    const averaged = new Map<number, number>();
+    for (const [year, values] of byYear) {
+      averaged.set(year, values.reduce((sum, value) => sum + value, 0) / values.length);
+    }
+    byDisco.set(disco, averaged);
   }
   return byDisco;
 }
@@ -152,51 +127,22 @@ async function main() {
     );
   }
 
-  // Real weight per DisCo per year: that DisCo's active-customer count at
-  // year-end (Q4), from the already-ingested DiscoPerformanceRecord - not
-  // a real one-off invented weight, and not a plain unweighted average
-  // (which would let a small DisCo's tariff move the "national" figure as
-  // much as a large one).
   const years = new Set<number>();
   for (const byYear of tariffsByDiscoYear.values()) {
     for (const year of byYear.keys()) years.add(year);
   }
 
   let backfilled = 0;
-  let skippedForNoWeights = 0;
 
-  for (const year of years) {
-    const q4Period = `q4-${year}`;
-    let weightedSum = 0;
-    let totalWeight = 0;
-    const missingWeights: string[] = [];
-
-    for (const [discoName, byYear] of tariffsByDiscoYear) {
+  for (const year of [...years].sort((a, b) => a - b)) {
+    const tariffs: number[] = [];
+    for (const byYear of tariffsByDiscoYear.values()) {
       const tariff = byYear.get(year);
-      if (tariff === undefined) continue;
-
-      const institutionId = discoInstitutionId(discoName);
-      const record = await prisma.discoPerformanceRecord.findUnique({
-        where: { institutionId_period: { institutionId, period: q4Period } },
-      });
-      if (!record || record.activeCustomers <= 0) {
-        missingWeights.push(discoName);
-        continue;
-      }
-      weightedSum += tariff * record.activeCustomers;
-      totalWeight += record.activeCustomers;
+      if (tariff !== undefined) tariffs.push(tariff);
     }
+    if (tariffs.length === 0) continue;
 
-    if (totalWeight === 0) {
-      console.log(`${year}: skipped - no DisCo has both a tariff and a real ${q4Period} customer count.`);
-      skippedForNoWeights++;
-      continue;
-    }
-    if (missingWeights.length > 0) {
-      console.log(`${year}: ${missingWeights.length} DisCo(s) had a tariff but no ${q4Period} customer count, excluded from the weighted average: ${missingWeights.join(", ")}`);
-    }
-
-    const nationalTariff = weightedSum / totalWeight;
+    const nationalTariff = tariffs.reduce((sum, value) => sum + value, 0) / tariffs.length;
     const period = String(year);
     const submissionId = `nerc-tariff-submission-${period}`;
     const itemId = `nerc-tariff-item-${period}`;
@@ -211,7 +157,7 @@ async function main() {
         status: "APPROVED",
         sourceFileUrl: uploadedFile.storageKey,
         originalFileName: uploadedFile.originalName,
-        sourceReference: "Historical bulk import - Compiled NERC Data 2020-2026 (customer-weighted national average of per-DisCo allowed tariffs)",
+        sourceReference: "Historical bulk import - Compiled NERC Data 2020-2026 (national average of per-DisCo allowed tariffs)",
         notes: "Backfilled by ingest-nerc-tariff-kpi.ts, not submitted through the live review queue.",
         reviewerId: adminId,
       },
@@ -252,7 +198,7 @@ async function main() {
     backfilled++;
   }
 
-  console.log(`Tariff KPI backfill complete: ${backfilled} year(s) backfilled, ${skippedForNoWeights} skipped for lack of weights.`);
+  console.log(`Tariff KPI backfill complete: ${backfilled} year(s) backfilled.`);
   await prisma.$disconnect();
 }
 

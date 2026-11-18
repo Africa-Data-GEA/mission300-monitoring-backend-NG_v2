@@ -44,6 +44,10 @@ const MONTH_TO_QUARTER: Record<string, number> = {
   December: 4,
 };
 
+function plantKey(plant: string): string {
+  return plant.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
 function cellString(value: ExcelJS.CellValue): string {
   if (value === null || value === undefined) return "";
   if (typeof value === "object" && "text" in (value as { text?: string })) {
@@ -111,7 +115,7 @@ function readInstalledCapacity(workbook: ExcelJS.Workbook): Map<number, number> 
     const year = cellNumber(row.getCell(3).value);
     const capacity = cellNumber(row.getCell(4).value);
     if (!plant || !year) return;
-    const key = `${plant.toLowerCase()}|${year}`;
+    const key = `${plantKey(plant)}|${year}`;
     // Duplicate rows found for the same plant+year always carry the same
     // value in this sheet (confirmed) - keep whichever was seen, no need
     // to prefer one over the other.
@@ -155,7 +159,7 @@ function readAvailableCapacity(workbook: ExcelJS.Workbook): Map<string, number> 
     const month = cellString(row.getCell(5).value);
     const value = cellNumber(row.getCell(6).value);
     if (!plant || !year || !month || !MONTH_TO_QUARTER[month]) return;
-    const key = `${plant.toLowerCase()}|${year}|${month}`;
+    const key = `${plantKey(plant)}|${year}|${month}`;
     const existing = perPlantMonth.get(key);
     if (existing === undefined || (existing === 0 && value !== 0)) {
       perPlantMonth.set(key, value);
