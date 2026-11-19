@@ -173,6 +173,16 @@ export class DataSubmissionsController {
   }
 
   @Roles("DATA_REVIEWER", "VALIDATOR", "SYSTEM_ADMINISTRATOR")
+  @Get("validation/batches/:batchId")
+  getValidationBatch(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("batchId") batchId: string,
+    @Query() query: DataSubmissionsQueryDto,
+  ) {
+    return this.dataSubmissions.getValidationQueue(user, query, batchId);
+  }
+
+  @Roles("DATA_REVIEWER", "VALIDATOR", "SYSTEM_ADMINISTRATOR")
   @Get("validation/:id")
   getSubmissionDetail(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string) {
     return this.dataSubmissions.getSubmissionDetail(user, id);

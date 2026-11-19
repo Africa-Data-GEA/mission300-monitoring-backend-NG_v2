@@ -339,6 +339,35 @@ export function toValidationQueueItem(submission: SubmissionWithQueueRelations) 
   };
 }
 
+export function groupByUpload(submissions: SubmissionWithQueueRelations[]) {
+  const groups = new Map<string, SubmissionWithQueueRelations[]>();
+  const order: string[] = [];
+  for (const submission of submissions) {
+    const key = submission.batchId ?? submission.id;
+    if (!groups.has(key)) {
+      groups.set(key, []);
+      order.push(key);
+    }
+    groups.get(key)!.push(submission);
+  }
+  return order.map((key) => {
+    const members = groups.get(key)!;
+    const first = toValidationQueueItem(members[0]);
+    if (members.length === 1 || !members[0].batchId) return first;
+    const institutions = new Set(members.map((member) => member.institution.name));
+    const periods = [...new Set(members.map((member) => member.obligation?.reportingPeriod ?? "Unknown period"))];
+    return {
+      ...first,
+      institution: institutions.size === 1 ? first.institution : `${institutions.size} institutions`,
+      reportingPeriod: periods.length === 1 ? periods[0] : `${periods.length} periods`,
+      validationSummary: `${members.length} submissions in this upload`,
+      batchId: members[0].batchId,
+      batchCount: members.length,
+      submissionIds: members.map((member) => member.id),
+    };
+  });
+}
+
 type SubmissionWithDetailRelations = Omit<SubmissionWithQueueRelations, "reviewDecisions"> & {
   items: (SubmissionItem & { kpiDefinition: KpiDefinition })[];
   reviewDecisions: (ReviewDecision & { reviewedBy: User })[];

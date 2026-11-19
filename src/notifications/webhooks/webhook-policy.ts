@@ -32,7 +32,7 @@ export function assertWebhookPatterns(patterns: string[]): void {
 export function publicWebhookPayload(event: string, payload: unknown): Record<string, string> | null {
   const fields: Record<string, readonly string[]> = {
     "submission.decision_recorded": ["submissionId", "institutionId", "decision"],
-    "submission.uploaded": ["submissionId", "institutionId"],
+    "submission.uploaded": ["submissionId", "institutionId", "batchId", "submissionCount"],
     "user.invited": ["userId", "email"],
     "report.ready": ["reportId"],
   };
@@ -40,6 +40,8 @@ export function publicWebhookPayload(event: string, payload: unknown): Record<st
   if (!keys || !payload || typeof payload !== "object") return null;
   const source = payload as Record<string, unknown>;
   return Object.fromEntries(
-    keys.filter((key) => typeof source[key] === "string").map((key) => [key, source[key] as string]),
+    keys
+      .filter((key) => typeof source[key] === "string" || typeof source[key] === "number")
+      .map((key) => [key, String(source[key])]),
   );
 }

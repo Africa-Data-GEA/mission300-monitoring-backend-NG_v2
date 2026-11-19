@@ -46,6 +46,7 @@ import {
   toSubmissionDetail,
   toSubmissionListItem,
   toUploadDefinition,
+  groupByUpload,
   toValidationQueueItem,
 } from "@/modules/data-submissions/data-submissions.mappers";
 import {
@@ -636,7 +637,7 @@ export class DataSubmissionsService {
     const created: { submissionId: string; version: number }[] = [];
     let totalValues = 0;
     const batchId = resolved.length > 1 ? randomUUID() : null;
-    for (const [index, row] of resolved.entries()) {
+    for (const row of resolved) {
       const reviewerId = await this.pickReviewer(user.id, consolidated ? (user.institutionId ?? row.institutionId) : row.institutionId);
       const items = buildSubmissionItems(obligation.dataset.fields, row.values, row.period);
       const submission = await this.createIfNothingWaiting(row.obligationId, row.period, {
@@ -650,17 +651,21 @@ export class DataSubmissionsService {
         sourceFileUrl: stored?.key,
         originalFileName: stored?.originalName,
         reviewerId,
+        ...(batchId ? { batchId } : {}),
         items: { create: items },
-      });
-      await this.rabbitmq.publish("submission.uploaded", {
-        submissionId: submission.id,
-        ...(batchId ? { batchId, batchSize: resolved.length, batchIndex: index } : {}),
       });
       created.push({ submissionId: submission.id, version: submission.version });
       totalValues += items.length;
     }
 
     const primary = created.find((entry) => entry.submissionId) ?? created[0];
+
+    await this.rabbitmq.publish("submission.uploaded", {
+      submissionId: primary.submissionId,
+      institutionId: user.institutionId ?? resolved[0].institutionId,
+      submissionCount: created.length,
+      ...(batchId ? { batchId } : {}),
+    });
 
     return {
       submissionId: primary.submissionId,
@@ -680,13 +685,14 @@ export class DataSubmissionsService {
     return generateTemplateBuffer(dataset, dataset.fields);
   }
 
-  async getValidationQueue(user: AuthenticatedUser, query: DataSubmissionsQueryDto) {
+  async getValidationQueue(user: AuthenticatedUser, query: DataSubmissionsQueryDto, batchId?: string) {
     const pageSize = Math.min(100, query.pageSize ?? DEFAULT_PAGE_SIZE);
     const search = query.search?.trim().toLowerCase() ?? "";
 
     const submissions = await this.prisma.submission.findMany({
       where: {
         status: { in: OPEN_FOR_DECISION },
+        ...(batchId ? { batchId } : {}),
         // scopeInstitutionFilter(user) last - see comment in getObligations().
         ...(query.institution && query.institution !== "all" ? { institutionId: query.institution } : {}),
         ...(query.reviewer && query.reviewer !== "all" ? { reviewerId: query.reviewer } : {}),
@@ -696,8 +702,7 @@ export class DataSubmissionsService {
       orderBy: { createdAt: "asc" }, // oldest-waiting first
     });
 
-    const views = submissions
-      .map(toValidationQueueItem)
+    const views = (batchId ? submissions.map(toValidationQueueItem) : groupByUpload(submissions))
       .filter(
         (view) =>
           !search || [view.institution, view.dataset, view.reviewer].join(" ").toLowerCase().includes(search),

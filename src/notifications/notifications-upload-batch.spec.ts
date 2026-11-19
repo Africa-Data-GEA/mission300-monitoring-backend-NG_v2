@@ -7,7 +7,7 @@ import type { BrandingService } from "@/modules/administration/branding/branding
 import type { NotificationsFeedService } from "@/notifications/feed/notifications-feed.service";
 import { NotificationsConsumer } from "./notifications.consumer";
 
-type UploadPayload = { submissionId: string; batchSize?: number; batchIndex?: number };
+type UploadPayload = { submissionId: string; submissionCount?: number };
 
 function build() {
   const prisma = {
@@ -59,18 +59,9 @@ describe("upload notifications", () => {
     );
   });
 
-  it("sends nothing for the later submissions of a multi-row upload", async () => {
-    const { prisma, email, feed, notify } = build();
-    await notify({ submissionId: "s2", batchSize: 12, batchIndex: 5 });
-    expect(prisma.submission.findUnique).not.toHaveBeenCalled();
-    expect(email.send).not.toHaveBeenCalled();
-    expect(feed.create).not.toHaveBeenCalled();
-    expect(feed.createMany).not.toHaveBeenCalled();
-  });
-
   it("sends one summary for the whole upload, pointing reviewers at the queue", async () => {
     const { email, feed, notify } = build();
-    await notify({ submissionId: "s1", batchSize: 12, batchIndex: 0 });
+    await notify({ submissionId: "s1", submissionCount: 12 });
     expect(email.send).toHaveBeenCalledTimes(3);
     expect(feed.create).toHaveBeenCalledWith(
       "u-nerc",

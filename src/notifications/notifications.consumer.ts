@@ -75,7 +75,7 @@ export class NotificationsConsumer implements OnModuleInit {
       case "submission.decision_recorded":
         return this.notifySubmissionDecision(payload as { submissionId: string });
       case "submission.uploaded":
-        return this.notifySubmissionUploaded(payload as { submissionId: string; batchSize?: number; batchIndex?: number });
+        return this.notifySubmissionUploaded(payload as { submissionId: string; submissionCount?: number });
       case "user.invited":
         return this.notifyUserInvited(payload as { userId: string; email: string });
       case "report.ready":
@@ -127,15 +127,12 @@ export class NotificationsConsumer implements OnModuleInit {
    */
   private async notifySubmissionUploaded({
     submissionId,
-    batchSize,
-    batchIndex,
+    submissionCount,
   }: {
     submissionId: string;
-    batchSize?: number;
-    batchIndex?: number;
+    submissionCount?: number;
   }) {
-    const batched = (batchSize ?? 1) > 1;
-    if (batched && batchIndex !== 0) return;
+    const batched = (submissionCount ?? 1) > 1;
 
     const submission = await this.prisma.submission.findUnique({
       where: { id: submissionId },
@@ -150,7 +147,7 @@ export class NotificationsConsumer implements OnModuleInit {
     const brand = await this.getEmailBrand();
     const frontendUrl = process.env.FRONTEND_URL;
 
-    const periodLabel = batched ? `${batchSize} submissions in this upload` : submission.obligation.reportingPeriod;
+    const periodLabel = batched ? `${submissionCount} submissions in this upload` : submission.obligation.reportingPeriod;
     const sourceName = batched ? submission.submittedBy.fullName : submission.institution.name;
     const queuePath = batched ? "/data-submissions/validation" : `/data-submissions/validation/${submission.id}`;
 

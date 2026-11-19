@@ -580,6 +580,7 @@ model Submission {
   // contract, but validationQueueItemSchema.reviewer is a required,
   // stable-per-submission field, so it has to be decided once and kept,
   // not recomputed differently on every read.
+  batchId        String?
   reviewerId     String?
   reviewer       User?             @relation("SubmissionReviewer", fields: [reviewerId], references: [id])
   createdAt      DateTime          @default(now())
@@ -592,6 +593,7 @@ model Submission {
   @@index([institutionId, status])
   @@index([obligationId])
   @@index([reviewerId])
+  @@index([batchId])
   @@map("submissions")
 }
 
