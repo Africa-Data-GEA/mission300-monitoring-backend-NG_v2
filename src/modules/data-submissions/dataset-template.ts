@@ -20,7 +20,41 @@ function periodColumnHeader(frequency: string): string {
 
 export async function generateTemplateBuffer(dataset: Dataset, fields: DatasetField[]): Promise<Buffer> {
   const workbook = new ExcelJS.Workbook();
-  const sheet = workbook.addWorksheet(SHEET_NAME);
+  addDatasetSheet(workbook, dataset, fields, SHEET_NAME);
+  const buffer = await workbook.xlsx.writeBuffer();
+  return Buffer.from(buffer);
+}
+
+export function workbookSheetNames(datasets: Pick<Dataset, "id" | "name">[]): Map<string, string> {
+  const names = new Map<string, string>();
+  const used = new Set<string>([LOOKUP_SHEET_NAME.toLowerCase()]);
+  for (const dataset of [...datasets].sort((a, b) => a.name.localeCompare(b.name))) {
+    const base = dataset.name.replace(/[\\/?*[\]:]/g, " ").replace(/\s+/g, " ").trim().slice(0, 31) || "Dataset";
+    let candidate = base;
+    for (let suffix = 2; used.has(candidate.toLowerCase()); suffix++) {
+      const tail = ` ${suffix}`;
+      candidate = `${base.slice(0, 31 - tail.length)}${tail}`;
+    }
+    used.add(candidate.toLowerCase());
+    names.set(dataset.id, candidate);
+  }
+  return names;
+}
+
+export async function generateWorkbookTemplateBuffer(
+  entries: { dataset: Dataset; fields: DatasetField[] }[],
+): Promise<Buffer> {
+  const workbook = new ExcelJS.Workbook();
+  const names = workbookSheetNames(entries.map((entry) => entry.dataset));
+  for (const entry of [...entries].sort((a, b) => a.dataset.name.localeCompare(b.dataset.name))) {
+    addDatasetSheet(workbook, entry.dataset, entry.fields, names.get(entry.dataset.id) as string);
+  }
+  const buffer = await workbook.xlsx.writeBuffer();
+  return Buffer.from(buffer);
+}
+
+function addDatasetSheet(workbook: ExcelJS.Workbook, dataset: Dataset, fields: DatasetField[], sheetName: string) {
+  const sheet = workbook.addWorksheet(sheetName);
   const measureColumns = [...fields]
     .sort((a, b) => a.order - b.order)
     .map((field) => ({ header: field.label, key: field.id, width: 28 }));
@@ -46,13 +80,15 @@ export async function generateTemplateBuffer(dataset: Dataset, fields: DatasetFi
     // dropdown constrains entry to values the parser actually recognizes.
     // Long option lists don't fit Excel's ~255-char inline list formula,
     // so they live on a hidden lookup sheet the dropdown references.
-    const lookupSheet = workbook.addWorksheet(LOOKUP_SHEET_NAME, { state: "veryHidden" });
-    DISCO_CANONICAL_NAMES.forEach((name, index) => {
-      lookupSheet.getCell(index + 1, 1).value = name;
-    });
-    MONTH_NAMES.forEach((name, index) => {
-      lookupSheet.getCell(index + 1, 2).value = name;
-    });
+    if (!workbook.getWorksheet(LOOKUP_SHEET_NAME)) {
+      const lookupSheet = workbook.addWorksheet(LOOKUP_SHEET_NAME, { state: "veryHidden" });
+      DISCO_CANONICAL_NAMES.forEach((name, index) => {
+        lookupSheet.getCell(index + 1, 1).value = name;
+      });
+      MONTH_NAMES.forEach((name, index) => {
+        lookupSheet.getCell(index + 1, 2).value = name;
+      });
+    }
 
     const discosColumnNumber = 1;
     const monthNameColumnNumber = hasMonthColumn ? identifierColumns.findIndex((c) => c.key === MONTH_NAME_COLUMN_KEY) + 1 : null;
@@ -79,9 +115,6 @@ export async function generateTemplateBuffer(dataset: Dataset, fields: DatasetFi
   } else {
     sheet.columns = [{ header: periodColumnHeader(dataset.frequency), key: PERIOD_COLUMN_KEY, width: 24 }, ...measureColumns];
   }
-
-  const buffer = await workbook.xlsx.writeBuffer();
-  return Buffer.from(buffer);
 }
 
 export interface ParsedSubmissionRow {
@@ -149,7 +182,20 @@ export async function parseSubmissionFile(
     await workbook.xlsx.load(buffer as unknown as ExcelJS.Buffer);
   }
 
-  const sheet = workbook.worksheets[0];
+  return parseSheet(workbook.worksheets[0], dataset, fields);
+}
+
+export async function loadWorkbook(buffer: Buffer): Promise<ExcelJS.Workbook> {
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(buffer as unknown as ExcelJS.Buffer);
+  return workbook;
+}
+
+export function parseSheet(
+  sheet: ExcelJS.Worksheet | undefined,
+  dataset: Dataset,
+  fields: DatasetField[],
+): ParsedSubmissionRow[] {
   const headerRow = sheet?.getRow(1);
   if (!sheet || !headerRow) {
     throw new Error("The uploaded file has no header row to read.");

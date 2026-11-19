@@ -52,8 +52,13 @@ import {
 import {
   buildSubmissionItems,
   generateTemplateBuffer,
+  generateWorkbookTemplateBuffer,
+  loadWorkbook,
+  parseSheet,
   parseSubmissionFile,
   validateFieldValues,
+  workbookSheetNames,
+  type ParsedSubmissionRow,
 } from "@/modules/data-submissions/dataset-template";
 import { DISCO_CANONICAL_NAMES, resolveDiscoName } from "@/modules/data-submissions/disco-institutions";
 
@@ -509,6 +514,8 @@ export class DataSubmissionsService {
       sourceReference: string;
       notes?: string;
       storeFile?: () => Promise<{ key: string; originalName: string }>;
+      batchId?: string;
+      deferEvent?: boolean;
     },
   ) {
     const consolidated = obligation.dataset.submissionMode === "NERC_CONSOLIDATED";
@@ -636,7 +643,7 @@ export class DataSubmissionsService {
 
     const created: { submissionId: string; version: number }[] = [];
     let totalValues = 0;
-    const batchId = resolved.length > 1 ? randomUUID() : null;
+    const batchId = options.batchId ?? (resolved.length > 1 ? randomUUID() : null);
     for (const row of resolved) {
       const reviewerId = await this.pickReviewer(user.id, consolidated ? (user.institutionId ?? row.institutionId) : row.institutionId);
       const items = buildSubmissionItems(obligation.dataset.fields, row.values, row.period);
@@ -660,12 +667,15 @@ export class DataSubmissionsService {
 
     const primary = created.find((entry) => entry.submissionId) ?? created[0];
 
-    await this.rabbitmq.publish("submission.uploaded", {
-      submissionId: primary.submissionId,
-      institutionId: user.institutionId ?? resolved[0].institutionId,
-      submissionCount: created.length,
-      ...(batchId ? { batchId } : {}),
-    });
+    const institutionId = user.institutionId ?? resolved[0].institutionId;
+    if (!options.deferEvent) {
+      await this.rabbitmq.publish("submission.uploaded", {
+        submissionId: primary.submissionId,
+        institutionId,
+        submissionCount: created.length,
+        ...(batchId ? { batchId } : {}),
+      });
+    }
 
     return {
       submissionId: primary.submissionId,
@@ -673,7 +683,164 @@ export class DataSubmissionsService {
       status: workflowStatus("pending-review"),
       message: receivedMessage(rows.length, totalValues, created.length),
       nextUrl: nextUrlAfterSubmit(user, created.length === 1 ? primary.submissionId : null),
+      submissionCount: created.length,
+      institutionId,
     };
+  }
+
+  private async workbookDatasets(user: AuthenticatedUser) {
+    return this.prisma.dataset.findMany({
+      where: {
+        isActive: true,
+        ...(user.institutionId
+          ? {
+              OR: [
+                { ownerInstitutionId: user.institutionId },
+                { obligations: { some: { institutionId: user.institutionId } } },
+              ],
+            }
+          : {}),
+      },
+      include: { fields: true },
+      orderBy: { name: "asc" },
+    });
+  }
+
+  async getWorkbookTemplate(user: AuthenticatedUser): Promise<Buffer> {
+    const datasets = await this.workbookDatasets(user);
+    if (datasets.length === 0) throw new NotFoundException("There are no datasets to report on.");
+    return generateWorkbookTemplateBuffer(datasets.map((dataset) => ({ dataset, fields: dataset.fields })));
+  }
+
+  async uploadWorkbook(
+    user: AuthenticatedUser,
+    file: Express.Multer.File | undefined,
+    dto: { sourceReference?: string; notes?: string },
+  ) {
+    if (!file) throw new BadRequestException("Select a completed workbook to upload.");
+    const sourceReference = dto.sourceReference?.trim();
+    if (!sourceReference) throw new BadRequestException("Provide the source reference for this submission.");
+
+    let workbook: Awaited<ReturnType<typeof loadWorkbook>>;
+    try {
+      workbook = await loadWorkbook(file.buffer);
+    } catch {
+      throw new BadRequestException("Could not read the uploaded file - use the provided workbook.");
+    }
+
+    const datasets = await this.workbookDatasets(user);
+    const sheetNames = workbookSheetNames(datasets);
+    const known = new Set([...sheetNames.values()].map((name) => name.toLowerCase()));
+    const unmatchedSheets = workbook.worksheets
+      .filter((sheet) => sheet.state === "visible" && !known.has(sheet.name.toLowerCase()))
+      .map((sheet) => sheet.name);
+
+    const batchId = randomUUID();
+    let stored: Promise<{ key: string; originalName: string }> | undefined;
+    const storeFile = () => (stored ??= this.storage.save("submissions", file));
+
+    const accepted: { sheet: string; dataset: string; submissions: number }[] = [];
+    const skipped: { sheet: string; dataset: string; reason: string }[] = [];
+    const rejected: { sheet: string; dataset: string; message: string; problems?: unknown }[] = [];
+    let firstSubmissionId: string | null = null;
+    let totalSubmissions = 0;
+    let institutionId: string | null = null;
+
+    for (const dataset of datasets) {
+      const sheetName = sheetNames.get(dataset.id) as string;
+      const sheet = workbook.worksheets.find((candidate) => candidate.name.toLowerCase() === sheetName.toLowerCase());
+      if (!sheet) continue;
+
+      let rows: ParsedSubmissionRow[];
+      try {
+        rows = parseSheet(sheet, dataset, dataset.fields);
+      } catch {
+        rejected.push({
+          sheet: sheetName,
+          dataset: dataset.name,
+          message: "The sheet could not be read. Use the columns from the provided workbook.",
+        });
+        continue;
+      }
+      if (rows.length === 0) continue;
+
+      const anchor = await this.findWorkbookAnchor(user, dataset);
+      if (!anchor) {
+        rejected.push({
+          sheet: sheetName,
+          dataset: dataset.name,
+          message: "There is no reporting obligation for this dataset, so the sheet cannot be submitted.",
+        });
+        continue;
+      }
+
+      try {
+        const result = await this.submitRows(user, anchor, rows, {
+          method: "UPLOAD",
+          sourceReference,
+          notes: dto.notes,
+          storeFile,
+          batchId,
+          deferEvent: true,
+        });
+        accepted.push({ sheet: sheetName, dataset: dataset.name, submissions: result.submissionCount });
+        firstSubmissionId ??= result.submissionId;
+        institutionId ??= result.institutionId;
+        totalSubmissions += result.submissionCount;
+      } catch (error) {
+        if (error instanceof ConflictException) {
+          skipped.push({ sheet: sheetName, dataset: dataset.name, reason: error.message });
+        } else if (error instanceof BadRequestException) {
+          const response = error.getResponse() as string | { message?: string; problems?: unknown };
+          rejected.push({
+            sheet: sheetName,
+            dataset: dataset.name,
+            message: typeof response === "string" ? response : (response.message ?? error.message),
+            problems: typeof response === "string" ? undefined : response.problems,
+          });
+        } else {
+          throw error;
+        }
+      }
+    }
+
+    if (firstSubmissionId) {
+      await this.rabbitmq.publish("submission.uploaded", {
+        submissionId: firstSubmissionId,
+        institutionId: user.institutionId ?? institutionId,
+        submissionCount: totalSubmissions,
+        datasetCount: accepted.length,
+        batchId,
+      });
+    }
+
+    const status = rejected.length === 0 && accepted.length > 0 ? "complete" : accepted.length > 0 ? "partial" : "failed";
+    return {
+      status,
+      batchId: firstSubmissionId ? batchId : null,
+      accepted,
+      skipped,
+      rejected,
+      unmatchedSheets,
+      message: workbookMessage(status, accepted.length, totalSubmissions, rejected.length),
+    };
+  }
+
+  private async findWorkbookAnchor(
+    user: AuthenticatedUser,
+    dataset: { id: string; ownerInstitutionId: string | null; submissionMode: string },
+  ) {
+    const institutionId = dataset.submissionMode === "NERC_CONSOLIDATED" ? dataset.ownerInstitutionId : user.institutionId;
+    if (!institutionId) return null;
+    const anchor = await this.prisma.obligation.findFirst({
+      where: { datasetId: dataset.id, institutionId },
+      orderBy: [{ acceptedSubmissionId: { sort: "asc", nulls: "first" } }, { dueDate: "asc" }],
+      select: { id: true },
+    });
+    if (!anchor) return null;
+    const obligation = await this.findObligationWithFields(anchor.id);
+    assertInstitutionMembership(user, obligation.institutionId);
+    return obligation;
   }
 
   async getTemplate(fileName: string): Promise<Buffer> {
@@ -693,6 +860,7 @@ export class DataSubmissionsService {
       where: {
         status: { in: OPEN_FOR_DECISION },
         ...(batchId ? { batchId } : {}),
+        ...(query.dataset && query.dataset !== "all" ? { obligation: { datasetId: query.dataset } } : {}),
         // scopeInstitutionFilter(user) last - see comment in getObligations().
         ...(query.institution && query.institution !== "all" ? { institutionId: query.institution } : {}),
         ...(query.reviewer && query.reviewer !== "all" ? { reviewerId: query.reviewer } : {}),
@@ -1064,6 +1232,14 @@ export class DataSubmissionsService {
     if (!obligation) throw new NotFoundException("The reporting obligation was not found.");
     return obligation;
   }
+}
+
+function workbookMessage(status: string, sheets: number, submissions: number, refused: number): string {
+  if (status === "failed") return "No sheet was submitted. Fix the sheets listed below and upload the workbook again.";
+  const done = `${submissions} submission${submissions === 1 ? "" : "s"} from ${sheets} sheet${sheets === 1 ? "" : "s"} were created for review. Nothing is published until a reviewer approves it.`;
+  return refused === 0
+    ? done
+    : `${done} ${refused} sheet${refused === 1 ? " was" : "s were"} refused: fix ${refused === 1 ? "it" : "them"} and upload the same workbook again. Sheets already submitted are skipped.`;
 }
 
 function buildObligationStats(views: ReturnType<typeof toObligationView>[]) {

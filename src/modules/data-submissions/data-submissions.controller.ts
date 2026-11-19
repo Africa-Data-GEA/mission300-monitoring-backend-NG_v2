@@ -122,6 +122,40 @@ export class DataSubmissionsController {
     return this.drafts.discard(user, id);
   }
 
+  @Get("workbook-template")
+  @Roles("SYSTEM_ADMINISTRATOR", "INSTITUTIONAL_DATA_PROVIDER")
+  async getWorkbookTemplate(@CurrentUser() user: AuthenticatedUser, @Res({ passthrough: true }) response: Response) {
+    const buffer = await this.dataSubmissions.getWorkbookTemplate(user);
+    response.set({
+      "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "Content-Disposition": 'attachment; filename="M300-submission-workbook.xlsx"',
+    });
+    return new StreamableFile(buffer);
+  }
+
+  @Post("workbook-upload")
+  @Roles("SYSTEM_ADMINISTRATOR", "INSTITUTIONAL_DATA_PROVIDER")
+  @ApiConsumes("multipart/form-data")
+  @AuditAction("submission.uploaded")
+  @UseInterceptors(
+    FileInterceptor("file", {
+      limits: { fileSize: MAX_UPLOAD_SIZE_BYTES },
+      fileFilter: (_req, file, callback) => {
+        const isWorkbook =
+          file.originalname.toLowerCase().endsWith(".xlsx") &&
+          file.mimetype === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+        callback(isWorkbook ? null : new BadRequestException("Only the .xlsx workbook is accepted."), isWorkbook);
+      },
+    }),
+  )
+  uploadWorkbook(
+    @CurrentUser() user: AuthenticatedUser,
+    @UploadedFile() file: Express.Multer.File,
+    @Body() dto: UploadSubmissionDto,
+  ) {
+    return this.dataSubmissions.uploadWorkbook(user, file, dto);
+  }
+
   @Get("obligations/:id/upload")
   getUploadDefinition(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string) {
     return this.dataSubmissions.getUploadDefinition(user, id);

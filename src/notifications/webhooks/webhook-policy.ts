@@ -32,7 +32,7 @@ export function assertWebhookPatterns(patterns: string[]): void {
 export function publicWebhookPayload(event: string, payload: unknown): Record<string, string> | null {
   const fields: Record<string, readonly string[]> = {
     "submission.decision_recorded": ["submissionId", "institutionId", "decision"],
-    "submission.uploaded": ["submissionId", "institutionId", "batchId", "submissionCount"],
+    "submission.uploaded": ["submissionId", "institutionId", "batchId", "submissionCount", "datasetCount"],
     "user.invited": ["userId", "email"],
     "report.ready": ["reportId"],
   };

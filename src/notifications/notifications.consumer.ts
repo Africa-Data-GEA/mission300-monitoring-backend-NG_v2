@@ -75,7 +75,7 @@ export class NotificationsConsumer implements OnModuleInit {
       case "submission.decision_recorded":
         return this.notifySubmissionDecision(payload as { submissionId: string });
       case "submission.uploaded":
-        return this.notifySubmissionUploaded(payload as { submissionId: string; submissionCount?: number });
+        return this.notifySubmissionUploaded(payload as { submissionId: string; submissionCount?: number; datasetCount?: number });
       case "user.invited":
         return this.notifyUserInvited(payload as { userId: string; email: string });
       case "report.ready":
@@ -128,9 +128,11 @@ export class NotificationsConsumer implements OnModuleInit {
   private async notifySubmissionUploaded({
     submissionId,
     submissionCount,
+    datasetCount,
   }: {
     submissionId: string;
     submissionCount?: number;
+    datasetCount?: number;
   }) {
     const batched = (submissionCount ?? 1) > 1;
 
@@ -144,6 +146,8 @@ export class NotificationsConsumer implements OnModuleInit {
     });
     if (!submission || !submission.obligation) return;
 
+    const datasetName =
+      (datasetCount ?? 1) > 1 ? `${datasetCount} datasets` : submission.obligation.dataset.name;
     const brand = await this.getEmailBrand();
     const frontendUrl = process.env.FRONTEND_URL;
 
@@ -154,7 +158,7 @@ export class NotificationsConsumer implements OnModuleInit {
     const received = submissionReceivedEmail(
       {
         institutionName: sourceName,
-        datasetName: submission.obligation.dataset.name,
+        datasetName: datasetName,
         reportingPeriod: periodLabel,
         submissionsUrl: `${frontendUrl}/data-submissions/submissions`,
       },
@@ -168,7 +172,7 @@ export class NotificationsConsumer implements OnModuleInit {
     await this.feed.create(
       submission.submittedBy.id,
       "Submission received",
-      `${submission.obligation.dataset.name} (${periodLabel}) was submitted for review.`,
+      `${datasetName} (${periodLabel}) was submitted for review.`,
       "/data-submissions/submissions",
     );
 
@@ -191,7 +195,7 @@ export class NotificationsConsumer implements OnModuleInit {
     const awaitingReview = submissionAwaitingReviewEmail(
       {
         institutionName: sourceName,
-        datasetName: submission.obligation.dataset.name,
+        datasetName: datasetName,
         reportingPeriod: periodLabel,
         submittedByName: submission.submittedBy.fullName,
         validationUrl: `${frontendUrl}${queuePath}`,
@@ -206,7 +210,7 @@ export class NotificationsConsumer implements OnModuleInit {
     await this.feed.createMany(
       reviewers.map((reviewer) => reviewer.id),
       AWAITING_REVIEW_TITLE,
-      `${sourceName} submitted ${submission.obligation.dataset.name} (${periodLabel}).`,
+      `${sourceName} submitted ${datasetName} (${periodLabel}).`,
       batched ? queuePath : awaitingReviewLink(submission.id),
     );
   }

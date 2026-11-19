@@ -356,8 +356,10 @@ export function groupByUpload(submissions: SubmissionWithQueueRelations[]) {
     if (members.length === 1 || !members[0].batchId) return first;
     const institutions = new Set(members.map((member) => member.institution.name));
     const periods = [...new Set(members.map((member) => member.obligation?.reportingPeriod ?? "Unknown period"))];
+    const datasets = [...new Set(members.map((member) => member.obligation?.dataset.name ?? "Unlinked submission"))];
     return {
       ...first,
+      dataset: datasets.length === 1 ? datasets[0] : `${datasets.length} datasets`,
       institution: institutions.size === 1 ? first.institution : `${institutions.size} institutions`,
       reportingPeriod: periods.length === 1 ? periods[0] : `${periods.length} periods`,
       validationSummary: `${members.length} submissions in this upload`,
