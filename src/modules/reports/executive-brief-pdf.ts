@@ -17,12 +17,12 @@ const MARGIN = 34;
 const HEADER_HEIGHT = 84;
 const FOOTER_HEIGHT = 40;
 const TILE_HEIGHT = 50;
-const CARD_HEIGHT = 60;
+const CARD_HEIGHT = 68;
 const GRID_GAP = 8;
 const PILLAR_ROW = 17;
-const ITEM_HEIGHT = 38;
+const ITEM_HEIGHT = 42;
 const ITEM_GAP = 4;
-const SECTION_GAP = 14;
+const SECTION_GAP = 12;
 const HEADING_HEIGHT = 18;
 
 const NAVY = "#00253C";
@@ -162,12 +162,12 @@ function drawIndicatorCard(doc: Doc, indicator: BriefIndicator, x: number, y: nu
     write(doc, "Not yet reported", x + 10, y + 29, { size: 9.5, color: GREY });
     return;
   }
-  write(doc, indicator.value, x + 10, y + 26, { size: 15, color: NAVY, bold: true, width: width - 20, height: 18 });
+  write(doc, indicator.value, x + 10, y + 25, { size: 15, color: NAVY, bold: true, width: width - 20, height: 18 });
   if (indicator.target) {
-    write(doc, `Target ${indicator.target}`, x + 10, y + 29, { size: 7, color: MUTED, width: width - 20, align: "right" });
+    write(doc, `Target ${indicator.target}`, x + 10, y + 44, { size: 7, color: MUTED, width: width - 20, height: 9 });
   }
 
-  const baseline = y + 47;
+  const baseline = y + CARD_HEIGHT - 14;
   if (indicator.change && indicator.change !== "No change") {
     const up = indicator.change.startsWith("+");
     const color = TONE_COLOR[indicator.tone];
@@ -243,7 +243,7 @@ function drawItem(
   doc.roundedRect(x, y, 3.5, ITEM_HEIGHT, 1.5).fill(item.badgeColor);
   drawBadge(doc, item.badge, item.badgeColor, x + 11, y + 6);
   write(doc, item.meta, x + 11, y + 8, { size: 7, color: MUTED, width: width - 22, align: "right" });
-  write(doc, item.body, x + 11, y + 21, { size: 7.5, color: TEXT, bold: true, width: width - 22, height: 16 });
+  write(doc, item.body, x + 11, y + 21, { size: 7.5, color: TEXT, bold: true, width: width - 22, height: 19 });
 }
 
 function drawEmptyItem(doc: Doc, message: string, x: number, y: number, width: number) {
