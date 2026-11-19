@@ -75,7 +75,7 @@ export class NotificationsConsumer implements OnModuleInit {
       case "submission.decision_recorded":
         return this.notifySubmissionDecision(payload as { submissionId: string });
       case "submission.uploaded":
-        return this.notifySubmissionUploaded(payload as { submissionId: string });
+        return this.notifySubmissionUploaded(payload as { submissionId: string; batchSize?: number; batchIndex?: number });
       case "user.invited":
         return this.notifyUserInvited(payload as { userId: string; email: string });
       case "report.ready":
@@ -125,7 +125,18 @@ export class NotificationsConsumer implements OnModuleInit {
    * Submissions rebuild), so the whole reviewer pool hears about it
    * rather than nobody at all.
    */
-  private async notifySubmissionUploaded({ submissionId }: { submissionId: string }) {
+  private async notifySubmissionUploaded({
+    submissionId,
+    batchSize,
+    batchIndex,
+  }: {
+    submissionId: string;
+    batchSize?: number;
+    batchIndex?: number;
+  }) {
+    const batched = (batchSize ?? 1) > 1;
+    if (batched && batchIndex !== 0) return;
+
     const submission = await this.prisma.submission.findUnique({
       where: { id: submissionId },
       include: {
@@ -139,11 +150,15 @@ export class NotificationsConsumer implements OnModuleInit {
     const brand = await this.getEmailBrand();
     const frontendUrl = process.env.FRONTEND_URL;
 
+    const periodLabel = batched ? `${batchSize} submissions in this upload` : submission.obligation.reportingPeriod;
+    const sourceName = batched ? submission.submittedBy.fullName : submission.institution.name;
+    const queuePath = batched ? "/data-submissions/validation" : `/data-submissions/validation/${submission.id}`;
+
     const received = submissionReceivedEmail(
       {
-        institutionName: submission.institution.name,
+        institutionName: sourceName,
         datasetName: submission.obligation.dataset.name,
-        reportingPeriod: submission.obligation.reportingPeriod,
+        reportingPeriod: periodLabel,
         submissionsUrl: `${frontendUrl}/data-submissions/submissions`,
       },
       brand,
@@ -156,7 +171,7 @@ export class NotificationsConsumer implements OnModuleInit {
     await this.feed.create(
       submission.submittedBy.id,
       "Submission received",
-      `${submission.obligation.dataset.name} (${submission.obligation.reportingPeriod}) was submitted for review.`,
+      `${submission.obligation.dataset.name} (${periodLabel}) was submitted for review.`,
       "/data-submissions/submissions",
     );
 
@@ -178,11 +193,11 @@ export class NotificationsConsumer implements OnModuleInit {
     });
     const awaitingReview = submissionAwaitingReviewEmail(
       {
-        institutionName: submission.institution.name,
+        institutionName: sourceName,
         datasetName: submission.obligation.dataset.name,
-        reportingPeriod: submission.obligation.reportingPeriod,
+        reportingPeriod: periodLabel,
         submittedByName: submission.submittedBy.fullName,
-        validationUrl: `${frontendUrl}/data-submissions/validation/${submission.id}`,
+        validationUrl: `${frontendUrl}${queuePath}`,
       },
       brand,
     );
@@ -194,8 +209,8 @@ export class NotificationsConsumer implements OnModuleInit {
     await this.feed.createMany(
       reviewers.map((reviewer) => reviewer.id),
       AWAITING_REVIEW_TITLE,
-      `${submission.institution.name} submitted ${submission.obligation.dataset.name} (${submission.obligation.reportingPeriod}).`,
-      awaitingReviewLink(submission.id),
+      `${sourceName} submitted ${submission.obligation.dataset.name} (${periodLabel}).`,
+      batched ? queuePath : awaitingReviewLink(submission.id),
     );
   }
 

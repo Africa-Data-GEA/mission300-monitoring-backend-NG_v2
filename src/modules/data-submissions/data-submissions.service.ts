@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { gapStateFor } from "@/modules/data-submissions/data-gap-state";
 import {
   BadRequestException,
@@ -634,7 +635,8 @@ export class DataSubmissionsService {
 
     const created: { submissionId: string; version: number }[] = [];
     let totalValues = 0;
-    for (const row of resolved) {
+    const batchId = resolved.length > 1 ? randomUUID() : null;
+    for (const [index, row] of resolved.entries()) {
       const reviewerId = await this.pickReviewer(user.id, consolidated ? (user.institutionId ?? row.institutionId) : row.institutionId);
       const items = buildSubmissionItems(obligation.dataset.fields, row.values, row.period);
       const submission = await this.createIfNothingWaiting(row.obligationId, row.period, {
@@ -650,7 +652,10 @@ export class DataSubmissionsService {
         reviewerId,
         items: { create: items },
       });
-      await this.rabbitmq.publish("submission.uploaded", { submissionId: submission.id });
+      await this.rabbitmq.publish("submission.uploaded", {
+        submissionId: submission.id,
+        ...(batchId ? { batchId, batchSize: resolved.length, batchIndex: index } : {}),
+      });
       created.push({ submissionId: submission.id, version: submission.version });
       totalValues += items.length;
     }
