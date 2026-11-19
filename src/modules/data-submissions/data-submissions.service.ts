@@ -53,6 +53,7 @@ import {
   buildSubmissionItems,
   generateTemplateBuffer,
   generateWorkbookTemplateBuffer,
+  INSTRUCTIONS_SHEET_NAME,
   loadWorkbook,
   parseSheet,
   parseSubmissionFile,
@@ -709,7 +710,20 @@ export class DataSubmissionsService {
   async getWorkbookTemplate(user: AuthenticatedUser): Promise<Buffer> {
     const datasets = await this.workbookDatasets(user);
     if (datasets.length === 0) throw new NotFoundException("There are no datasets to report on.");
-    return generateWorkbookTemplateBuffer(datasets.map((dataset) => ({ dataset, fields: dataset.fields })));
+    const open = user.institutionId
+      ? await this.prisma.obligation.findMany({
+          where: { institutionId: user.institutionId, acceptedSubmissionId: null },
+          select: { datasetId: true, reportingPeriod: true },
+          orderBy: { dueDate: "asc" },
+        })
+      : [];
+    return generateWorkbookTemplateBuffer(
+      datasets.map((dataset) => ({
+        dataset,
+        fields: dataset.fields,
+        openPeriods: open.filter((entry) => entry.datasetId === dataset.id).map((entry) => entry.reportingPeriod),
+      })),
+    );
   }
 
   async uploadWorkbook(
@@ -732,7 +746,12 @@ export class DataSubmissionsService {
     const sheetNames = workbookSheetNames(datasets);
     const known = new Set([...sheetNames.values()].map((name) => name.toLowerCase()));
     const unmatchedSheets = workbook.worksheets
-      .filter((sheet) => sheet.state === "visible" && !known.has(sheet.name.toLowerCase()))
+      .filter(
+        (sheet) =>
+          sheet.state === "visible" &&
+          sheet.name.toLowerCase() !== INSTRUCTIONS_SHEET_NAME.toLowerCase() &&
+          !known.has(sheet.name.toLowerCase()),
+      )
       .map((sheet) => sheet.name);
 
     const batchId = randomUUID();
@@ -753,7 +772,7 @@ export class DataSubmissionsService {
 
       let rows: ParsedSubmissionRow[];
       try {
-        rows = parseSheet(sheet, dataset, dataset.fields);
+        rows = parseSheet(sheet, dataset, dataset.fields, { skipUnfilled: true });
       } catch {
         rejected.push({
           sheet: sheetName,

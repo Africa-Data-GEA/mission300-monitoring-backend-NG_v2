@@ -34,13 +34,23 @@ describe("submission workbook", () => {
       { dataset: grid, fields: [field("f2", "Losses %", 1)] },
     ]);
     const workbook = await loadWorkbook(buffer);
-    expect(workbook.worksheets.map((sheet) => sheet.name)).toEqual(["Grid Losses", "Solar Capacity"]);
+    expect(workbook.worksheets.map((sheet) => sheet.name)).toEqual(["Instructions", "Grid Losses", "Solar Capacity"]);
 
     const solarSheet = workbook.getWorksheet("Solar Capacity");
     solarSheet!.getCell(2, 1).value = "Q3 2026";
     solarSheet!.getCell(2, 2).value = 12;
     const rows = parseSheet(solarSheet, solar, [field("f1", "Installed MW", 1)]);
     expect(rows).toEqual([{ period: "Q3 2026", values: { f1: "12" }, institutionName: undefined, rowNumber: 2 }]);
+
+    const prefilled = await loadWorkbook(
+      await generateWorkbookTemplateBuffer([{ dataset: solar, fields: [field("f1", "Installed MW", 1)], openPeriods: ["Q3 2026", "Q4 2026"] }]),
+    );
+    const sheet = prefilled.getWorksheet("Solar Capacity");
+    expect(parseSheet(sheet, solar, [field("f1", "Installed MW", 1)], { skipUnfilled: true })).toEqual([]);
+    sheet!.getCell(3, 2).value = 5;
+    expect(parseSheet(sheet, solar, [field("f1", "Installed MW", 1)], { skipUnfilled: true })).toEqual([
+      { period: "Q4 2026", values: { f1: "5" }, institutionName: undefined, rowNumber: 3 },
+    ]);
 
     expect(parseSheet(workbook.getWorksheet("Grid Losses"), grid, [field("f2", "Losses %", 1)])).toEqual([]);
   });

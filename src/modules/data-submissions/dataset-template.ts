@@ -5,6 +5,7 @@ import { DISCO_CANONICAL_NAMES, MONTH_NAMES, MONTH_TO_QUARTER } from "@/modules/
 
 const SHEET_NAME = "Submission";
 const LOOKUP_SHEET_NAME = "Lookup";
+export const INSTRUCTIONS_SHEET_NAME = "Instructions";
 const PERIOD_COLUMN_KEY = "period";
 const DISCOS_COLUMN_KEY = "discos";
 const DATE_COLUMN_KEY = "date";
@@ -27,7 +28,7 @@ export async function generateTemplateBuffer(dataset: Dataset, fields: DatasetFi
 
 export function workbookSheetNames(datasets: Pick<Dataset, "id" | "name">[]): Map<string, string> {
   const names = new Map<string, string>();
-  const used = new Set<string>([LOOKUP_SHEET_NAME.toLowerCase()]);
+  const used = new Set<string>([LOOKUP_SHEET_NAME.toLowerCase(), INSTRUCTIONS_SHEET_NAME.toLowerCase()]);
   for (const dataset of [...datasets].sort((a, b) => a.name.localeCompare(b.name))) {
     const base = dataset.name.replace(/[\\/?*[\]:]/g, " ").replace(/\s+/g, " ").trim().slice(0, 31) || "Dataset";
     let candidate = base;
@@ -42,12 +43,30 @@ export function workbookSheetNames(datasets: Pick<Dataset, "id" | "name">[]): Ma
 }
 
 export async function generateWorkbookTemplateBuffer(
-  entries: { dataset: Dataset; fields: DatasetField[] }[],
+  entries: { dataset: Dataset; fields: DatasetField[]; openPeriods?: string[] }[],
 ): Promise<Buffer> {
   const workbook = new ExcelJS.Workbook();
   const names = workbookSheetNames(entries.map((entry) => entry.dataset));
-  for (const entry of [...entries].sort((a, b) => a.dataset.name.localeCompare(b.dataset.name))) {
-    addDatasetSheet(workbook, entry.dataset, entry.fields, names.get(entry.dataset.id) as string);
+  const sorted = [...entries].sort((a, b) => a.dataset.name.localeCompare(b.dataset.name));
+  const guide = workbook.addWorksheet(INSTRUCTIONS_SHEET_NAME);
+  guide.columns = [{ width: 36 }, { width: 70 }];
+  guide.addRow(["Mission 300 submission workbook"]).font = { bold: true, size: 14 };
+  guide.addRow(["Fill in the sheets you have data for. Leave the others empty; they are skipped."]);
+  guide.addRow(["A sheet with errors is refused by name and the others are still submitted. Fix it and upload the same workbook again."]);
+  guide.addRow(["Do not rename sheets or change the column headings."]);
+  guide.addRow([]);
+  guide.addRow(["Sheet", "What to fill in"]).font = { bold: true };
+  for (const entry of sorted) {
+    const periods = entry.openPeriods?.length ? `Periods already listed: ${entry.openPeriods.join(", ")}. Type the values.` : "Add one row per period (or per DisCo and month).";
+    guide.addRow([names.get(entry.dataset.id), periods]);
+  }
+  for (const entry of sorted) {
+    const sheet = addDatasetSheet(workbook, entry.dataset, entry.fields, names.get(entry.dataset.id) as string);
+    if (entry.dataset.submissionMode !== "NERC_CONSOLIDATED") {
+      (entry.openPeriods ?? []).forEach((period, index) => {
+        sheet.getCell(index + 2, 1).value = period;
+      });
+    }
   }
   const buffer = await workbook.xlsx.writeBuffer();
   return Buffer.from(buffer);
@@ -115,6 +134,7 @@ function addDatasetSheet(workbook: ExcelJS.Workbook, dataset: Dataset, fields: D
   } else {
     sheet.columns = [{ header: periodColumnHeader(dataset.frequency), key: PERIOD_COLUMN_KEY, width: 24 }, ...measureColumns];
   }
+  return sheet;
 }
 
 export interface ParsedSubmissionRow {
@@ -195,6 +215,7 @@ export function parseSheet(
   sheet: ExcelJS.Worksheet | undefined,
   dataset: Dataset,
   fields: DatasetField[],
+  options: { skipUnfilled?: boolean } = {},
 ): ParsedSubmissionRow[] {
   const headerRow = sheet?.getRow(1);
   if (!sheet || !headerRow) {
@@ -265,6 +286,7 @@ export function parseSheet(
     if (consolidated) {
       period = year ? periodFromComponents(dataset.frequency, year, monthName || dateMonth) : "";
     }
+    if (options.skipUnfilled && Object.values(values).every((value) => !value.trim())) continue;
     rows.push({ period, values, institutionName, rowNumber });
   }
 
