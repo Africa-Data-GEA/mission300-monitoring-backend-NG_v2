@@ -23,6 +23,7 @@ import type { ReportsQueryDto } from "@/modules/reports/dto/reports-query.dto";
 import { compareReportingValues, withoutFuturePeriods } from "@/common/utils/reporting-period";
 import { ExecutiveBriefService } from "@/modules/reports/executive-brief.service";
 import { renderExecutiveBriefPdf } from "@/modules/reports/executive-brief-pdf";
+import type { BriefData } from "@/modules/reports/executive-brief";
 
 const DEFAULT_PAGE_SIZE = 10;
 
@@ -251,14 +252,17 @@ export class ReportsService {
     }
     const snapshot = saved.previewSnapshot as unknown as {
       metadata: { title: string; reportingPeriod: string; generatedAt: string; limitations: string };
-      sections: { title: string; columns: string[]; rows: string[][] }[];
+      brief?: BriefData;
     };
+    if (!snapshot.brief) {
+      throw new ConflictException("This brief predates the current layout. Generate it again to create a new version.");
+    }
     const buffer = await renderExecutiveBriefPdf({
       title: snapshot.metadata.title,
       reportingPeriod: snapshot.metadata.reportingPeriod,
       generatedAt: snapshot.metadata.generatedAt,
       limitations: snapshot.metadata.limitations,
-      sections: snapshot.sections,
+      brief: snapshot.brief,
     });
     return { buffer, fileName: saved.fileReference.replace(/\.[^.]+$/, "") + ".pdf" };
   }
@@ -316,6 +320,7 @@ export class ReportsService {
       (c) => c.reportType === toKebabCase(config.reportType),
     )!;
     const now = new Date().toISOString();
+    const brief = config.reportType === "EXECUTIVE_BRIEF" ? await this.executiveBrief.build(config) : null;
 
     return {
       metadata: {
@@ -330,7 +335,8 @@ export class ReportsService {
         limitations:
           `Generated from the ${PLATFORM_NAME} live database. Verify against the approved Compact Progress Report before external distribution.`,
       },
-      sections: await this.sectionsFor(config.reportType, config),
+      sections: brief ? brief.sections : await this.sectionsFor(config.reportType, config),
+      ...(brief ? { brief: brief.brief } : {}),
     };
   }
 
@@ -359,7 +365,7 @@ export class ReportsService {
       case "DATA_QUALITY":
         return [await this.dataQualitySection(config)];
       case "EXECUTIVE_BRIEF":
-        return this.executiveBrief.sections(config);
+        return (await this.executiveBrief.build(config)).sections;
     }
   }
 

@@ -8,10 +8,16 @@ import {
   BRIEF_ACTION_LIMIT,
   BRIEF_BOTTLENECK_LIMIT,
   HEADLINE_KPI_CODES,
+  changeTone,
   formatBriefChange,
   formatBriefValue,
   rankActions,
   rankBottlenecks,
+  type BriefAction,
+  type BriefBottleneck,
+  type BriefData,
+  type BriefIndicator,
+  type BriefPillar,
 } from "@/modules/reports/executive-brief";
 
 export interface BriefSection {
@@ -23,11 +29,63 @@ export interface BriefSection {
 const AT_RISK_PROJECT_STATUSES = ["AT_RISK", "DELAYED", "BLOCKED"] as const;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+export function toBriefSections(brief: BriefData): BriefSection[] {
+  const { glance } = brief;
+  return [
+    {
+      title: "At a glance",
+      columns: ["Measure", "Status"],
+      rows: [
+        ["Headline indicators reported", `${glance.indicatorsReported} of ${glance.indicatorsTotal}`],
+        ["Projects at risk, delayed or blocked", String(glance.projectsAtRisk)],
+        ["Open critical or high bottlenecks", String(glance.criticalBottlenecks)],
+        ["Priority actions delayed or at risk", String(glance.delayedActions)],
+      ],
+    },
+    {
+      title: "Headline indicators",
+      columns: ["Indicator", "Latest", "Period", "Change", "Target"],
+      rows: brief.indicators.map((indicator) => [
+        indicator.name,
+        indicator.value ?? "Not yet reported",
+        indicator.period ?? "—",
+        indicator.change ?? "—",
+        indicator.target ?? "—",
+      ]),
+    },
+    {
+      title: "Progress by pillar",
+      columns: ["Pillar", "Projects", "On track or complete", "At risk or delayed", "Open bottlenecks"],
+      rows: brief.pillars.map((pillar) => [
+        pillar.name,
+        String(pillar.projects),
+        String(pillar.onTrack),
+        String(pillar.atRisk),
+        String(pillar.bottlenecks),
+      ]),
+    },
+    {
+      title: "Bottlenecks requiring action",
+      columns: ["Issue", "Severity", "Pillar", "Age (days)", "Status"],
+      rows: brief.bottlenecks.length
+        ? brief.bottlenecks.map((item) => [item.issue, item.severity, item.pillar, String(item.ageDays), item.status])
+        : [["No open bottlenecks are recorded.", "—", "—", "—", "—"]],
+    },
+    {
+      title: "Priority actions",
+      columns: ["Action", "Lead institution", "Due", "Status"],
+      rows: brief.actions.length
+        ? brief.actions.map((item) => [item.action, item.lead || "—", item.due ?? "—", item.status])
+        : [["No reform actions are outstanding.", "—", "—", "—"]],
+    },
+  ];
+}
+
 @Injectable()
 export class ExecutiveBriefService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async sections(config: ReportConfigLike): Promise<BriefSection[]> {
+  async build(config: ReportConfigLike): Promise<{ sections: BriefSection[]; brief: BriefData }> {
     const [indicators, pillars, bottlenecks, actions] = await Promise.all([
       this.headlineIndicators(config),
       this.pillarProgress(config),
@@ -35,26 +93,20 @@ export class ExecutiveBriefService {
       this.priorityActions(config),
     ]);
 
-    return [
-      this.atAGlance(indicators.reported, indicators.total, pillars.atRiskProjects, bottlenecks.open, actions.delayed),
-      indicators.section,
-      pillars.section,
-      bottlenecks.section,
-      actions.section,
-    ];
-  }
-
-  private atAGlance(reported: number, total: number, atRisk: number, openBottlenecks: number, delayedActions: number): BriefSection {
-    return {
-      title: "At a glance",
-      columns: ["Measure", "Status"],
-      rows: [
-        ["Headline indicators reported", `${reported} of ${total}`],
-        ["Projects at risk, delayed or blocked", String(atRisk)],
-        ["Open critical or high bottlenecks", String(openBottlenecks)],
-        ["Priority actions delayed or at risk", String(delayedActions)],
-      ],
+    const brief: BriefData = {
+      glance: {
+        indicatorsReported: indicators.reported,
+        indicatorsTotal: indicators.items.length,
+        projectsAtRisk: pillars.atRiskProjects,
+        criticalBottlenecks: bottlenecks.open,
+        delayedActions: actions.delayed,
+      },
+      indicators: indicators.items,
+      pillars: pillars.items,
+      bottlenecks: bottlenecks.items,
+      actions: actions.items,
     };
+    return { sections: toBriefSections(brief), brief };
   }
 
   private async headlineIndicators(config: ReportConfigLike) {
@@ -77,7 +129,7 @@ export class ExecutiveBriefService {
     }
 
     let reported = 0;
-    const rows: string[][] = [];
+    const items: BriefIndicator[] = [];
     for (const code of HEADLINE_KPI_CODES) {
       const definition = byCode.get(code);
       if (!definition || !matchesPillars(config, definition.pillar.slug)) continue;
@@ -87,24 +139,18 @@ export class ExecutiveBriefService {
       const previous = [...ordered].reverse().find((value) => value.period !== latest?.period);
       if (latest) reported += 1;
 
-      rows.push([
-        definition.name,
-        latest ? formatBriefValue(Number(latest.value), definition.unit) : "Not yet reported",
-        latest ? formatPeriodLabel(latest.period) : "—",
-        latest && previous ? formatBriefChange(Number(latest.value), Number(previous.value), definition.unit) : "—",
-        definition.target !== null ? formatBriefValue(Number(definition.target), definition.unit) : "—",
-      ]);
+      const hasChange = latest !== undefined && previous !== undefined;
+      items.push({
+        name: definition.name,
+        value: latest ? formatBriefValue(Number(latest.value), definition.unit) : null,
+        period: latest ? formatPeriodLabel(latest.period) : null,
+        change: hasChange ? formatBriefChange(Number(latest.value), Number(previous.value), definition.unit) : null,
+        tone: hasChange ? changeTone(Number(latest.value) - Number(previous.value), definition.direction) : "neutral",
+        target: definition.target !== null ? formatBriefValue(Number(definition.target), definition.unit) : null,
+      });
     }
 
-    return {
-      reported,
-      total: rows.length,
-      section: {
-        title: "Headline indicators",
-        columns: ["Indicator", "Latest", "Period", "Change", "Target"],
-        rows,
-      },
-    };
+    return { reported, items };
   }
 
   private async pillarProgress(config: ReportConfigLike) {
@@ -118,7 +164,7 @@ export class ExecutiveBriefService {
     ]);
 
     let atRiskProjects = 0;
-    const rows = pillars
+    const items: BriefPillar[] = pillars
       .filter((pillar) => matchesPillars(config, pillar.slug))
       .map((pillar) => {
         const own = projects.filter((project) => project.pillar.slug === pillar.slug);
@@ -128,17 +174,10 @@ export class ExecutiveBriefService {
         ).length;
         atRiskProjects += atRisk;
         const open = bottlenecks.filter((bottleneck) => bottleneck.pillar.slug === pillar.slug).length;
-        return [pillar.name, String(own.length), String(onTrack), String(atRisk), String(open)];
+        return { name: pillar.name, projects: own.length, onTrack, atRisk, bottlenecks: open };
       });
 
-    return {
-      atRiskProjects,
-      section: {
-        title: "Progress by pillar",
-        columns: ["Pillar", "Projects", "On track or complete", "At risk or delayed", "Open bottlenecks"],
-        rows,
-      },
-    };
+    return { atRiskProjects, items };
   }
 
   private async bottlenecksNeedingAction(config: ReportConfigLike) {
@@ -149,24 +188,17 @@ export class ExecutiveBriefService {
     });
     const scoped = records.filter((record) => matchesPillars(config, record.pillar.slug));
     const open = scoped.filter((record) => record.severity === "CRITICAL" || record.severity === "HIGH").length;
-    const rankedBottlenecks = rankBottlenecks(scoped).slice(0, BRIEF_BOTTLENECK_LIMIT);
+    const items: BriefBottleneck[] = rankBottlenecks(scoped)
+      .slice(0, BRIEF_BOTTLENECK_LIMIT)
+      .map((record) => ({
+        issue: record.issue,
+        severity: toKebabCase(record.severity),
+        pillar: record.pillar.name,
+        ageDays: Math.max(0, Math.floor((now - record.dateRaised.getTime()) / DAY_MS)),
+        status: toKebabCase(record.status),
+      }));
 
-    return {
-      open,
-      section: {
-        title: "Bottlenecks requiring action",
-        columns: ["Issue", "Severity", "Pillar", "Age (days)", "Status"],
-        rows: rankedBottlenecks.length
-          ? rankedBottlenecks.map((record) => [
-              record.issue,
-              toKebabCase(record.severity),
-              record.pillar.name,
-              String(Math.max(0, Math.floor((now - record.dateRaised.getTime()) / DAY_MS))),
-              toKebabCase(record.status),
-            ])
-          : [["No open bottlenecks are recorded.", "—", "—", "—", "—"]],
-      },
-    };
+    return { open, items };
   }
 
   private async priorityActions(config: ReportConfigLike) {
@@ -175,25 +207,18 @@ export class ExecutiveBriefService {
       include: { pillar: true },
     });
     const scoped = records.filter((record) => matchesPillars(config, record.pillar.slug));
-    const ranked = rankActions(scoped);
     const delayed = scoped.filter(
       (record) => record.isPriority && (record.status === "DELAYED" || record.status === "IN_PROGRESS_AT_RISK"),
     ).length;
+    const items: BriefAction[] = rankActions(scoped)
+      .slice(0, BRIEF_ACTION_LIMIT)
+      .map((record) => ({
+        action: record.action,
+        lead: record.leadInstitution,
+        due: record.dueDate ? record.dueDate.toISOString().slice(0, 10) : null,
+        status: toKebabCase(record.status),
+      }));
 
-    return {
-      delayed,
-      section: {
-        title: "Priority actions",
-        columns: ["Action", "Lead institution", "Due", "Status"],
-        rows: ranked.length
-          ? ranked.slice(0, BRIEF_ACTION_LIMIT).map((record) => [
-              record.action,
-              record.leadInstitution || "—",
-              record.dueDate ? record.dueDate.toISOString().slice(0, 10) : "—",
-              toKebabCase(record.status),
-            ])
-          : [["No reform actions are outstanding.", "—", "—", "—"]],
-      },
-    };
+    return { delayed, items };
   }
 }

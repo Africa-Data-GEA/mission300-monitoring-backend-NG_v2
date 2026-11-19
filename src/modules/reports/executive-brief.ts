@@ -75,3 +75,57 @@ export function rankActions<T extends { isPriority: boolean; status: string; due
       due(a) - due(b),
   );
 }
+
+export type BriefTone = "good" | "bad" | "neutral";
+
+export interface BriefIndicator {
+  name: string;
+  value: string | null;
+  period: string | null;
+  change: string | null;
+  tone: BriefTone;
+  target: string | null;
+}
+
+export interface BriefPillar {
+  name: string;
+  projects: number;
+  onTrack: number;
+  atRisk: number;
+  bottlenecks: number;
+}
+
+export interface BriefBottleneck {
+  issue: string;
+  severity: string;
+  pillar: string;
+  ageDays: number;
+  status: string;
+}
+
+export interface BriefAction {
+  action: string;
+  lead: string;
+  due: string | null;
+  status: string;
+}
+
+export interface BriefData {
+  glance: {
+    indicatorsReported: number;
+    indicatorsTotal: number;
+    projectsAtRisk: number;
+    criticalBottlenecks: number;
+    delayedActions: number;
+  };
+  indicators: BriefIndicator[];
+  pillars: BriefPillar[];
+  bottlenecks: BriefBottleneck[];
+  actions: BriefAction[];
+}
+
+export function changeTone(delta: number, direction: "HIGHER_IS_BETTER" | "LOWER_IS_BETTER"): BriefTone {
+  if (Math.abs(delta) < 1e-9) return "neutral";
+  const improving = direction === "HIGHER_IS_BETTER" ? delta > 0 : delta < 0;
+  return improving ? "good" : "bad";
+}

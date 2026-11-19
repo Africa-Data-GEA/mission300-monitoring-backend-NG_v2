@@ -1,4 +1,4 @@
-import { formatBriefChange, formatBriefValue, rankActions, rankBottlenecks } from "./executive-brief";
+import { changeTone, formatBriefChange, formatBriefValue, rankActions, rankBottlenecks } from "./executive-brief";
 
 describe("formatBriefValue", () => {
   it("shows percentages to one decimal with a % sign", () => {
@@ -61,5 +61,21 @@ describe("rankActions", () => {
       "priority-on-track",
       "plain-delayed",
     ]);
+  });
+});
+
+describe("changeTone", () => {
+  it("is good when a higher-is-better value rises and bad when it falls", () => {
+    expect(changeTone(2, "HIGHER_IS_BETTER")).toBe("good");
+    expect(changeTone(-2, "HIGHER_IS_BETTER")).toBe("bad");
+  });
+
+  it("is good when a lower-is-better value falls and bad when it rises", () => {
+    expect(changeTone(-2, "LOWER_IS_BETTER")).toBe("good");
+    expect(changeTone(2, "LOWER_IS_BETTER")).toBe("bad");
+  });
+
+  it("is neutral when nothing moved", () => {
+    expect(changeTone(0, "HIGHER_IS_BETTER")).toBe("neutral");
   });
 });
