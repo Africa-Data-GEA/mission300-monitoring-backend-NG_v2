@@ -709,7 +709,7 @@ export class DataSubmissionsService {
     if (!submission) throw new NotFoundException("Submission not found.");
 
     const isReviewer = (user.roles?.length ? user.roles : [user.role]).some(
-      (role) => role === "DATA_REVIEWER" || role === "VALIDATOR",
+      (role) => role === "DATA_REVIEWER" || role === "VALIDATOR" || role === "SYSTEM_ADMINISTRATOR",
     );
     const isSelfReview = submission.submittedById === user.id;
     const { allowSelfReview } = await this.securitySettings.get();

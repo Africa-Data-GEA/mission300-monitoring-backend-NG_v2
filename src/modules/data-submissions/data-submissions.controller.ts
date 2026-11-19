@@ -178,10 +178,7 @@ export class DataSubmissionsController {
     return this.dataSubmissions.getSubmissionDetail(user, id);
   }
 
-  // Same role gate as the old submissions module's decision endpoint
-  // (src/modules/submissions/submissions.controller.ts) - deliberately
-  // not including SYSTEM_ADMINISTRATOR, matching that existing precedent.
-  @Roles("DATA_REVIEWER", "VALIDATOR")
+  @Roles("DATA_REVIEWER", "VALIDATOR", "SYSTEM_ADMINISTRATOR")
   @Post("validation/:id/decisions")
   @AuditAction("submission.decision_recorded")
   recordDecision(
@@ -192,7 +189,7 @@ export class DataSubmissionsController {
     return this.dataSubmissions.recordDecision(user, id, dto);
   }
 
-  @Roles("DATA_REVIEWER", "VALIDATOR")
+  @Roles("DATA_REVIEWER", "VALIDATOR", "SYSTEM_ADMINISTRATOR")
   @Post("validation/bulk-decisions")
   @AuditAction("submission.decision_recorded")
   bulkRecordDecision(@CurrentUser() user: AuthenticatedUser, @Body() dto: BulkRecordValidationDecisionDto) {
