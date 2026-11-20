@@ -35,7 +35,7 @@ describe("validation queue grouping", () => {
       submissionIds: ["a", "b", "c"],
     });
     expect(rows[1]).toMatchObject({ id: "d", institution: "REA" });
-    expect(rows[1]).not.toHaveProperty("batchId");
+    expect((rows[1] as { batchId?: string }).batchId).toBeUndefined();
   });
 });
 

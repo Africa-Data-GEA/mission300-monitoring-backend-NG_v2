@@ -55,7 +55,11 @@ export async function generateWorkbookTemplateBuffer(
   guide.addRow(["A sheet with errors is refused by name and the others are still submitted. Fix it and upload the same workbook again."]);
   guide.addRow(["Do not rename sheets or change the column headings."]);
   guide.addRow([]);
-  guide.addRow(["Sheet", "What to fill in"]).font = { bold: true };
+  const guideHeader = guide.addRow(["Sheet", "What to fill in"]);
+  guideHeader.eachCell((cell) => {
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF005380" } };
+    cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+  });
   for (const entry of sorted) {
     const periods = entry.openPeriods?.length ? `Periods already listed: ${entry.openPeriods.join(", ")}. Type the values.` : "Add one row per period (or per DisCo and month).";
     guide.addRow([names.get(entry.dataset.id), periods]);
@@ -64,12 +68,74 @@ export async function generateWorkbookTemplateBuffer(
     const sheet = addDatasetSheet(workbook, entry.dataset, entry.fields, names.get(entry.dataset.id) as string);
     if (entry.dataset.submissionMode !== "NERC_CONSOLIDATED") {
       (entry.openPeriods ?? []).forEach((period, index) => {
-        sheet.getCell(index + 2, 1).value = period;
+        sheet.getCell(index + 3, 1).value = period;
       });
     }
   }
   const buffer = await workbook.xlsx.writeBuffer();
   return Buffer.from(buffer);
+}
+
+export function describeField(field: Pick<DatasetField, "type" | "unit" | "required" | "helpText" | "label">): string {
+  const kind = field.type === "NUMBER" ? "Number" : "Text";
+  const unit = (field.unit ?? "").trim();
+  const range = unit === "%" ? " between 0 and 100" : "";
+  const unitText = unit && unit !== "%" ? ` in ${unit}` : unit === "%" ? " (%)" : "";
+  const help = field.helpText?.trim() ? ` ${field.helpText.trim().replace(/\.?$/, ".")}` : "";
+  return `${kind}${range}${unitText}. ${field.required ? "Required" : "Optional"}.${help}`;
+}
+
+function periodDescription(frequency: string): string {
+  if (frequency === "Monthly") return "Month and year, for example January 2026.";
+  if (frequency === "Annual") return "Year, for example 2026.";
+  return "Quarter and year, for example Q3 2026.";
+}
+
+const IDENTIFIER_DESCRIPTIONS: Record<string, string> = {
+  [DISCOS_COLUMN_KEY]: "Pick the DisCo from the list.",
+  [DATE_COLUMN_KEY]: "Optional. Any date in the month.",
+  [YEAR_COLUMN_KEY]: "Four-digit year, for example 2026.",
+  [MONTH_NAME_COLUMN_KEY]: "Pick the month from the list.",
+};
+
+function descriptionTexts(dataset: Dataset, fields: DatasetField[]): Set<string> {
+  return new Set([
+    periodDescription(dataset.frequency),
+    ...Object.values(IDENTIFIER_DESCRIPTIONS),
+    ...fields.map((field) => describeField(field)),
+  ]);
+}
+
+function addDescriptionRow(sheet: ExcelJS.Worksheet, dataset: Dataset, fields: DatasetField[]) {
+  const byId = new Map(fields.map((field) => [field.id, field]));
+  const row = sheet.getRow(2);
+  row.height = 48;
+  sheet.columns.forEach((column, index) => {
+    const key = String(column.key ?? "");
+    const field = byId.get(key);
+    const text = field
+      ? describeField(field)
+      : key === PERIOD_COLUMN_KEY
+        ? periodDescription(dataset.frequency)
+        : (IDENTIFIER_DESCRIPTIONS[key] ?? "");
+    const cell = row.getCell(index + 1);
+    cell.value = text;
+    cell.font = { italic: true, size: 9, color: { argb: "FF5B6B78" } };
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFEAF1F6" } };
+    cell.alignment = { vertical: "top", wrapText: true };
+  });
+}
+
+function styleHeaderRow(sheet: ExcelJS.Worksheet) {
+  const row = sheet.getRow(1);
+  row.height = 28;
+  row.eachCell({ includeEmpty: false }, (cell) => {
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF005380" } };
+    cell.font = { bold: true, color: { argb: "FFFFFFFF" }, size: 11 };
+    cell.alignment = { vertical: "middle", horizontal: "left", wrapText: true };
+    cell.border = { bottom: { style: "medium", color: { argb: "FFFFB400" } } };
+  });
+  sheet.views = [{ state: "frozen", ySplit: 1 }];
 }
 
 function addDatasetSheet(workbook: ExcelJS.Workbook, dataset: Dataset, fields: DatasetField[], sheetName: string) {
@@ -134,6 +200,8 @@ function addDatasetSheet(workbook: ExcelJS.Workbook, dataset: Dataset, fields: D
   } else {
     sheet.columns = [{ header: periodColumnHeader(dataset.frequency), key: PERIOD_COLUMN_KEY, width: 24 }, ...measureColumns];
   }
+  styleHeaderRow(sheet);
+  addDescriptionRow(sheet, dataset, fields);
   return sheet;
 }
 
@@ -150,6 +218,14 @@ function normalizeLabel(label: string): string {
 
 function isPeriodHeader(headerText: string): boolean {
   return normalizeLabel(headerText).startsWith("period");
+}
+
+function isDescriptionRow(row: ExcelJS.Row, texts: Set<string>): boolean {
+  let matches = false;
+  row.eachCell({ includeEmpty: false }, (cell) => {
+    if (typeof cell.value === "string" && texts.has(cell.value)) matches = true;
+  });
+  return matches;
 }
 
 function isRowBlank(row: ExcelJS.Row): boolean {
@@ -256,9 +332,11 @@ export function parseSheet(
   });
 
   const rows: ParsedSubmissionRow[] = [];
+  const guideTexts = descriptionTexts(dataset, fields);
   for (let rowNumber = 2; rowNumber <= sheet.rowCount; rowNumber++) {
     const dataRow = sheet.getRow(rowNumber);
     if (isRowBlank(dataRow)) continue;
+    if (rowNumber === 2 && isDescriptionRow(dataRow, guideTexts)) continue;
 
     let period = "";
     let institutionName: string | undefined;
@@ -284,7 +362,8 @@ export function parseSheet(
     }
 
     if (consolidated) {
-      period = year ? periodFromComponents(dataset.frequency, year, monthName || dateMonth) : "";
+      const month = monthName || dateMonth;
+      period = year && (dataset.frequency === "Annual" || month) ? periodFromComponents(dataset.frequency, year, month) : "";
     }
     if (options.skipUnfilled && Object.values(values).every((value) => !value.trim())) continue;
     rows.push({ period, values, institutionName, rowNumber });

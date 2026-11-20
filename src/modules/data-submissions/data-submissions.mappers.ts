@@ -160,6 +160,7 @@ export function toSubmissionListItem(submission: SubmissionWithRelations, latest
   return {
     id: submission.id,
     obligationId: submission.obligationId,
+    batchId: submission.batchId ?? undefined,
     institution: submission.institution.name,
     dataset: submission.obligation?.dataset.name ?? "Unlinked submission",
     reportingPeriod: submission.obligation?.reportingPeriod ?? "Unknown period",
@@ -353,7 +354,7 @@ export function groupByUpload(submissions: SubmissionWithQueueRelations[]) {
   return order.map((key) => {
     const members = groups.get(key)!;
     const first = toValidationQueueItem(members[0]);
-    if (members.length === 1 || !members[0].batchId) return first;
+    if (!members[0].batchId) return first;
     const institutions = new Set(members.map((member) => member.institution.name));
     const periods = [...new Set(members.map((member) => member.obligation?.reportingPeriod ?? "Unknown period"))];
     const datasets = [...new Set(members.map((member) => member.obligation?.dataset.name ?? "Unlinked submission"))];
@@ -368,6 +369,62 @@ export function groupByUpload(submissions: SubmissionWithQueueRelations[]) {
       submissionIds: members.map((member) => member.id),
     };
   });
+}
+
+type BatchSubmission = SubmissionWithQueueRelations & {
+  items: (SubmissionItem & { kpiDefinition: KpiDefinition })[];
+};
+
+export function toUploadBatch(batchId: string, submissions: BatchSubmission[]) {
+  const first = submissions[0];
+  const byDataset = new Map<string, BatchSubmission[]>();
+  for (const submission of submissions) {
+    const key = submission.obligation?.datasetId ?? "unlinked";
+    byDataset.set(key, [...(byDataset.get(key) ?? []), submission]);
+  }
+  const datasets = [...byDataset.values()].map((members) => {
+    const columns = new Map<string, { id: string; name: string; unit: string }>();
+    for (const member of members) {
+      for (const item of member.items) {
+        if (!columns.has(item.kpiDefinitionId)) {
+          columns.set(item.kpiDefinitionId, {
+            id: item.kpiDefinitionId,
+            name: item.kpiDefinition.name,
+            unit: item.kpiDefinition.unit,
+          });
+        }
+      }
+    }
+    const rows = [...members]
+      .sort(
+        (a, b) =>
+          a.institution.name.localeCompare(b.institution.name) || a.createdAt.getTime() - b.createdAt.getTime(),
+      )
+      .map((member) => ({
+        id: member.id,
+        institution: member.institution.name,
+        period: member.obligation?.reportingPeriod ?? "Unknown period",
+        status: submissionWorkflowStatus(member.status),
+        canDecide: member.status === "PENDING" || member.status === "PROVISIONALLY_APPROVED",
+        values: Object.fromEntries(member.items.map((item) => [item.kpiDefinitionId, Number(item.value)])),
+      }));
+    return {
+      name: members[0].obligation?.dataset.name ?? "Unlinked submission",
+      columns: [...columns.values()],
+      rows,
+    };
+  });
+  return {
+    batchId,
+    submittedBy: first.submittedBy.fullName,
+    submittedAtLabel: formatAgeLabel(first.createdAt),
+    sourceReference: first.sourceReference ?? "",
+    fileName: first.originalFileName,
+    notes: first.notes ?? "",
+    total: submissions.length,
+    pending: submissions.filter((s) => s.status === "PENDING" || s.status === "PROVISIONALLY_APPROVED").length,
+    datasets,
+  };
 }
 
 type SubmissionWithDetailRelations = Omit<SubmissionWithQueueRelations, "reviewDecisions"> & {

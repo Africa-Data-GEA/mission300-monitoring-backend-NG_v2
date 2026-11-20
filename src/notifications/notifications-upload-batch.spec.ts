@@ -76,4 +76,11 @@ describe("upload notifications", () => {
       "/data-submissions/validation",
     );
   });
+
+  it("also alerts reviewers who review every institution and belong to none", async () => {
+    const { prisma, notify } = build();
+    await notify({ submissionId: "s1" });
+    const where = JSON.stringify(prisma.user.findMany.mock.calls[0][0].where);
+    expect(where).toContain('"reviewsAllInstitutions":true');
+  });
 });

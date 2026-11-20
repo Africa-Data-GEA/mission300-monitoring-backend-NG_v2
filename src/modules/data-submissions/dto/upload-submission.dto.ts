@@ -12,4 +12,8 @@ export class UploadSubmissionDto {
   @IsOptional()
   @IsString()
   notes?: string;
+
+  @IsOptional()
+  @IsString()
+  institutionId?: string;
 }

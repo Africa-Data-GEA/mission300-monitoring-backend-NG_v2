@@ -124,8 +124,12 @@ export class DataSubmissionsController {
 
   @Get("workbook-template")
   @Roles("SYSTEM_ADMINISTRATOR", "INSTITUTIONAL_DATA_PROVIDER")
-  async getWorkbookTemplate(@CurrentUser() user: AuthenticatedUser, @Res({ passthrough: true }) response: Response) {
-    const buffer = await this.dataSubmissions.getWorkbookTemplate(user);
+  async getWorkbookTemplate(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query("institution") institution: string | undefined,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const buffer = await this.dataSubmissions.getWorkbookTemplate(user, institution);
     response.set({
       "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       "Content-Disposition": 'attachment; filename="M300-submission-workbook.xlsx"',
@@ -208,12 +212,8 @@ export class DataSubmissionsController {
 
   @Roles("DATA_REVIEWER", "VALIDATOR", "SYSTEM_ADMINISTRATOR")
   @Get("validation/batches/:batchId")
-  getValidationBatch(
-    @CurrentUser() user: AuthenticatedUser,
-    @Param("batchId") batchId: string,
-    @Query() query: DataSubmissionsQueryDto,
-  ) {
-    return this.dataSubmissions.getValidationQueue(user, query, batchId);
+  getValidationBatch(@CurrentUser() user: AuthenticatedUser, @Param("batchId") batchId: string) {
+    return this.dataSubmissions.getUploadBatch(user, batchId);
   }
 
   @Roles("DATA_REVIEWER", "VALIDATOR", "SYSTEM_ADMINISTRATOR")
