@@ -49,6 +49,14 @@ export class NotificationsFeedService {
     return { count };
   }
 
+  async resolveAwaitingReviewLink(link: string, title: string, description: string) {
+    const { count } = await this.prisma.notification.updateMany({
+      where: { title: AWAITING_REVIEW_TITLE, link },
+      data: { title, description, read: true },
+    });
+    return { count };
+  }
+
   async create(userId: string, title: string, description: string, link: string) {
     return this.prisma.notification.create({ data: { userId, title, description, link } });
   }

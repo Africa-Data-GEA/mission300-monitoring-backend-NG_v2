@@ -4,6 +4,7 @@ import type { AuthenticatedUser } from "@/common/decorators/current-user.decorat
 export const WEBHOOK_PATTERNS = [
   "submission.decision_recorded",
   "submission.uploaded",
+  "submission.decisions_recorded",
   "submission.*",
   "user.invited",
   "user.*",
@@ -33,6 +34,7 @@ export function publicWebhookPayload(event: string, payload: unknown): Record<st
   const fields: Record<string, readonly string[]> = {
     "submission.decision_recorded": ["submissionId", "institutionId", "decision"],
     "submission.uploaded": ["submissionId", "institutionId", "batchId", "submissionCount", "datasetCount"],
+    "submission.decisions_recorded": ["submissionId", "institutionId", "decision", "batchId", "submissionCount"],
     "user.invited": ["userId", "email"],
     "report.ready": ["reportId"],
   };

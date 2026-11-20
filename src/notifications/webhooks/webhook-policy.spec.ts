@@ -67,7 +67,7 @@ describe("Webhook integration permissions and payloads", () => {
   });
 
   it.each(
-    [[], ["*"], ["auth.*"], ["submission.unknown"], Array(8).fill("submission.*")].map((patterns) => ({
+    [[], ["*"], ["auth.*"], ["submission.unknown"], Array(9).fill("submission.*")].map((patterns) => ({
       patterns,
     })),
   )("rejects unapproved event patterns %j", ({ patterns }) => {

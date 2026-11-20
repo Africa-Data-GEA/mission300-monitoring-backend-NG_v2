@@ -331,7 +331,13 @@ export class DataSubmissionsService {
       .map((submission) => toSubmissionListItem(submission, latestIds.has(submission.id)))
       .filter((view) => !search || [view.institution, view.dataset].join(" ").toLowerCase().includes(search));
 
-    return paginate(views, query.page ?? 1, pageSize);
+    const uploads = new Map<string, typeof views>();
+    for (const view of views) {
+      const key = view.batchId ?? view.id;
+      uploads.set(key, [...(uploads.get(key) ?? []), view]);
+    }
+    const page = paginate([...uploads.values()], query.page ?? 1, pageSize);
+    return { ...page, items: page.items.flat() };
   }
 
   async getOverdue(user: AuthenticatedUser, query: DataSubmissionsQueryDto) {
@@ -949,7 +955,12 @@ export class DataSubmissionsService {
    * obligation's acceptedSubmissionId"), which the old module never had
    * to do because it predates the Obligation concept entirely.
    */
-  async recordDecision(user: AuthenticatedUser, id: string, dto: RecordValidationDecisionDto) {
+  async recordDecision(
+    user: AuthenticatedUser,
+    id: string,
+    dto: RecordValidationDecisionDto,
+    options: { deferEvent?: boolean } = {},
+  ) {
     const submission = await this.prisma.submission.findUnique({
       where: { id, ...scopeSubmissionFilter(user) },
       include: {
@@ -1038,13 +1049,15 @@ export class DataSubmissionsService {
       if (consolidated) {
         rollup = await rollupNationalKpis(tx, quartersTouched(submission.items.map((item) => item.period)), user.id);
       }
-    });
+    }, { timeout: 30_000, maxWait: 10_000 });
 
-    await this.rabbitmq.publish("submission.decision_recorded", {
-      submissionId: id,
-      decision: reviewType,
-      institutionId: submission.institutionId,
-    });
+    if (!options.deferEvent) {
+      await this.rabbitmq.publish("submission.decision_recorded", {
+        submissionId: id,
+        decision: reviewType,
+        institutionId: submission.institutionId,
+      });
+    }
 
     const published = publishesValue
       ? submission.items.filter((item) => !heldBack.has(item.id)).map((item) => ({
@@ -1072,6 +1085,9 @@ export class DataSubmissionsService {
       message,
       nextUrl: "/data-submissions/validation",
       published,
+      decision: reviewType,
+      institutionId: submission.institutionId,
+      batchId: submission.batchId,
     };
   }
 
@@ -1090,13 +1106,25 @@ export class DataSubmissionsService {
 
     for (const id of ids) {
       try {
-        succeeded.push(await this.recordDecision(user, id, dto));
+        succeeded.push(await this.recordDecision(user, id, dto, { deferEvent: true }));
       } catch (error) {
         failed.push({
           submissionId: id,
           message: error instanceof Error ? error.message : "Decision failed.",
         });
       }
+    }
+
+    const first = succeeded[0];
+    if (first) {
+      const batches = new Set(succeeded.map((entry) => entry.batchId));
+      await this.rabbitmq.publish("submission.decisions_recorded", {
+        submissionId: first.submissionId,
+        institutionId: first.institutionId,
+        decision: first.decision,
+        submissionCount: succeeded.length,
+        ...(batches.size === 1 && first.batchId ? { batchId: first.batchId } : {}),
+      });
     }
 
     return {
@@ -1187,19 +1215,25 @@ export class DataSubmissionsService {
     if (groups.length === 0) return;
 
     const now = new Date();
-    for (const group of groups) {
-      const dataset = await this.prisma.dataset.findUnique({ where: { id: group.datasetId } });
-      if (!dataset) continue;
+    const datasets = new Map(
+      (
+        await this.prisma.dataset.findMany({ where: { id: { in: [...new Set(groups.map((group) => group.datasetId))] } } })
+      ).map((dataset) => [dataset.id, dataset]),
+    );
+    const accepted = await this.prisma.obligation.findMany({
+      where: { ...scopeWhere, acceptedSubmissionId: { not: null } },
+      orderBy: { dueDate: "desc" },
+    });
+    const lastAcceptedBy = new Map<string, (typeof accepted)[number]>();
+    for (const obligation of accepted) {
+      const key = `${obligation.institutionId}|${obligation.datasetId}`;
+      if (!lastAcceptedBy.has(key)) lastAcceptedBy.set(key, obligation);
+    }
 
-      const lastAccepted = await this.prisma.obligation.findFirst({
-        where: {
-          institutionId: group.institutionId,
-          datasetId: group.datasetId,
-          acceptedSubmissionId: { not: null },
-        },
-        orderBy: { dueDate: "desc" },
-      });
-      if (!lastAccepted) continue;
+    for (const group of groups) {
+      const dataset = datasets.get(group.datasetId);
+      const lastAccepted = lastAcceptedBy.get(`${group.institutionId}|${group.datasetId}`);
+      if (!dataset || !lastAccepted) continue;
 
       const frontierEnd = periodEndDate(dataset.frequency, mostRecentClosedPeriod(dataset.frequency, now));
       let cursor = nextPeriod(dataset.frequency, lastAccepted.reportingPeriod);

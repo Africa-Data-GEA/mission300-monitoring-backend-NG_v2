@@ -61,7 +61,7 @@ export class NotificationsConsumer implements OnModuleInit {
   async onModuleInit() {
     await this.rabbitmq.subscribe(
       "notifications.dispatch",
-      ["submission.decision_recorded", "submission.uploaded", "user.invited", "report.ready"],
+      ["submission.decision_recorded", "submission.decisions_recorded", "submission.uploaded", "user.invited", "report.ready"],
       (payload, event) => this.handle(event, payload),
     );
   }
@@ -74,12 +74,61 @@ export class NotificationsConsumer implements OnModuleInit {
     switch (event) {
       case "submission.decision_recorded":
         return this.notifySubmissionDecision(payload as { submissionId: string });
+      case "submission.decisions_recorded":
+        return this.notifySubmissionDecisions(
+          payload as { submissionId: string; submissionCount: number; batchId?: string },
+        );
       case "submission.uploaded":
-        return this.notifySubmissionUploaded(payload as { submissionId: string; submissionCount?: number; datasetCount?: number });
+        return this.notifySubmissionUploaded(
+          payload as { submissionId: string; submissionCount?: number; datasetCount?: number; batchId?: string },
+        );
       case "user.invited":
         return this.notifyUserInvited(payload as { userId: string; email: string });
       case "report.ready":
         return this.notifyReportReady(payload as { reportId: string });
+    }
+  }
+
+  private async notifySubmissionDecisions({
+    submissionId,
+    submissionCount,
+    batchId,
+  }: {
+    submissionId: string;
+    submissionCount: number;
+    batchId?: string;
+  }) {
+    if (submissionCount <= 1) return this.notifySubmissionDecision({ submissionId });
+
+    const submission = await this.prisma.submission.findUnique({
+      where: { id: submissionId },
+      include: { submittedBy: true, reviewDecisions: { orderBy: { createdAt: "desc" }, take: 1 } },
+    });
+    const latestDecision = submission?.reviewDecisions[0];
+    if (!submission || !latestDecision) return;
+
+    const phrase = DECISION_PHRASES[latestDecision.decision] ?? latestDecision.decision.toLowerCase();
+    const { subject, html } = submissionDecisionEmail(
+      {
+        institutionName: `${submissionCount} submissions`,
+        decision: latestDecision.decision,
+        comment: latestDecision.comment,
+      },
+      await this.getEmailBrand(),
+    );
+    await this.email.send({ to: submission.submittedBy.email, subject, html });
+    await this.feed.create(
+      submission.submittedBy.id,
+      `Submissions ${phrase}`,
+      `${submissionCount} of your submissions were ${phrase}.`,
+      "/data-submissions/submissions",
+    );
+    if (batchId) {
+      await this.feed.resolveAwaitingReviewLink(
+        `/data-submissions/validation/batches/${batchId}`,
+        `Submissions ${phrase}`,
+        `${submissionCount} submissions were ${phrase}.`,
+      );
     }
   }
 
@@ -129,10 +178,12 @@ export class NotificationsConsumer implements OnModuleInit {
     submissionId,
     submissionCount,
     datasetCount,
+    batchId,
   }: {
     submissionId: string;
     submissionCount?: number;
     datasetCount?: number;
+    batchId?: string;
   }) {
     const batched = (submissionCount ?? 1) > 1;
 
@@ -153,7 +204,12 @@ export class NotificationsConsumer implements OnModuleInit {
 
     const periodLabel = batched ? `${submissionCount} submissions in this upload` : submission.obligation.reportingPeriod;
     const sourceName = batched ? submission.submittedBy.fullName : submission.institution.name;
-    const queuePath = batched ? "/data-submissions/validation" : `/data-submissions/validation/${submission.id}`;
+    const queuePath =
+      batched && batchId
+        ? `/data-submissions/validation/batches/${batchId}`
+        : batched
+          ? "/data-submissions/validation"
+          : `/data-submissions/validation/${submission.id}`;
 
     const received = submissionReceivedEmail(
       {

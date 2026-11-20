@@ -36,7 +36,8 @@ describe("a quarterly consolidated NERC file, which has no Month_Name column", (
     expect(monthFromDateCell("not a date")).toBe("");
   });
 
-  it("still refuses a row with no usable month, instead of guessing", async () => {
-    await expect(parseSubmissionFile(await file([["Ikeja Electric", "", 2026, 10, 5]]), "t.xlsx", dataset, fields)).rejects.toThrow(/Unrecognized month/);
+  it("leaves the period blank for a row with no usable month, instead of guessing", async () => {
+    const rows = await parseSubmissionFile(await file([["Ikeja Electric", "", 2026, 10, 5]]), "t.xlsx", dataset, fields);
+    expect(rows[0]?.period).toBe("");
   });
 });
