@@ -35,7 +35,7 @@
     "docker:prisma:generate": "docker compose -f docker/docker-compose.yml --env-file .env.development exec -T api pnpm prisma:generate",
     "docker:prisma:migrate:deploy": "docker compose -f docker/docker-compose.yml --env-file .env.development exec -T api pnpm prisma:migrate:deploy",
     "docker:prisma:seed": "docker compose -f docker/docker-compose.yml --env-file .env.development exec -T api pnpm prisma:seed",
-    "docker:prisma:seed:reference": "docker compose -f docker/docker-compose.yml --env-file .env.development exec -T api pnpm prisma:seed:reference -- --force",
+    "docker:prisma:seed:reference": "docker compose -f docker/docker-compose.yml --env-file .env.development exec -T api pnpm prisma:seed:reference",
     "prisma:generate": "prisma generate",
     "prisma:migrate:dev": "prisma migrate dev",
     "prisma:migrate:deploy": "prisma migrate deploy",
