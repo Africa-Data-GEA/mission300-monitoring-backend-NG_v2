@@ -38,6 +38,7 @@ const ORDER = [
   "ingest-fgn-compact-progress-electricity-access",
   "ingest-fgn-compact-progress-clean-cooking-headline",
   "ingest-reform-actions",
+  "ingest-cdmu-datasets",
   "backfill-institution-traceability",
   "link-duplicate-kpis",
 ];

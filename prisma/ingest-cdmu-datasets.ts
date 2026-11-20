@@ -43,6 +43,18 @@ const DATASETS: DatasetSpec[] = [
         unit: "%",
         kpiCode: "M300-P2-008",
       },
+      {
+        label: "Electric Cooking Penetration",
+        helpText: "Share of households that cook with electricity, as stated in the Compact Progress Report.",
+        unit: "%",
+        kpiCode: "M300-P2-010",
+      },
+      {
+        label: "Population Without Clean Cooking Access",
+        helpText: "Number of people without access to clean cooking, as stated in the Compact Progress Report.",
+        unit: "people",
+        kpiCode: "M300-P2-012",
+      },
     ],
   },
   {
@@ -58,6 +70,12 @@ const DATASETS: DatasetSpec[] = [
         helpText: "Share of Compact milestones delivered to date, from the CDMU Compact Monitoring Tool.",
         unit: "%",
         kpiCode: "M300-PX-003",
+      },
+      {
+        label: "Private Capital Mobilized",
+        helpText: "Verified private capital mobilized in the quarter, from the CDMU verified ledger.",
+        unit: "USD Million",
+        kpiCode: "M300-P4-008",
       },
     ],
   },
