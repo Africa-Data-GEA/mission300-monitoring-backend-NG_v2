@@ -21,6 +21,7 @@
     "ingest-fgn-compact-progress-electricity-access.ts",
     "ingest-fgn-compact-progress-clean-cooking-headline.ts",
     "ingest-reform-actions.ts",
+    "ingest-q3-2026-reform-action-update.ts",
     "ingest-cdmu-datasets.ts",
     "ingest-niso-generation-kpis.ts",
     "ingest-derived-utility-kpis.ts",

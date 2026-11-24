@@ -525,36 +525,6 @@
   "comment": "NERC issued the Net Billing Regulations 2026, which commenced on the 3rd of June 2026."
  },
  {
-  "id": "reform-action-private-sector-participation-04",
-  "pillar": "private-sector-participation",
-  "serial": "04",
-  "commitment": "Process outlined for regulatory approval of private-sector-led mini-grids (including tariff regulations)",
-  "action": "Better contract management and dispute resolution",
-  "isPriority": false,
-  "referenceDueDate": null,
-  "dueDate": null,
-  "completedAt": null,
-  "previousStatus": null,
-  "status": "NOT_YET_DUE",
-  "lastUpdate": "2025-12-20",
-  "comment": "This indicator may not be necessary and should be removed."
- },
- {
-  "id": "reform-action-private-sector-participation-05",
-  "pillar": "private-sector-participation",
-  "serial": "05",
-  "commitment": "Process outlined for regulatory approval of private-sector-led mini-grids (including tariff regulations)",
-  "action": "Updated tariff regulations including, where possible, harmonization at state levels, including adjustments based on macro costs",
-  "isPriority": false,
-  "referenceDueDate": null,
-  "dueDate": null,
-  "completedAt": null,
-  "previousStatus": null,
-  "status": "NOT_YET_DUE",
-  "lastUpdate": "2025-12-20",
-  "comment": "This indicator is currently not applicable"
- },
- {
   "id": "reform-action-private-sector-participation-06",
   "pillar": "private-sector-participation",
   "serial": "01",
@@ -718,21 +688,6 @@
   "status": "DELAYED",
   "lastUpdate": "2025-12-20",
   "comment": "Seed financing for DisCo Performance Improvement Plans is provided under the DISREP, on concessional terms structured as Investment Project Financing and Programme-for-Results. The facility finances key PIP components. All DisCos have executed the Shareholders' Loan Agreement and submitted Board Resolutions and Individual Action Plans, except JEDC. The closing date has been extended by 23 months to 30 May 2028, and an additional $308 million is under discussion. Transition to commercial financing remains prospective; no DisCo has raised commercial finance based on DISREP-funded improvements."
- },
- {
-  "id": "reform-action-financially-viable-utilities-10",
-  "pillar": "financially-viable-utilities",
-  "serial": "10",
-  "commitment": "Utilities achieving at least 100 percent operational cost recovery",
-  "action": "Focus on commercial losses and low collections first and set aggressive targets",
-  "isPriority": false,
-  "referenceDueDate": null,
-  "dueDate": null,
-  "completedAt": null,
-  "previousStatus": null,
-  "status": "NOT_YET_DUE",
-  "lastUpdate": "2025-12-20",
-  "comment": "This indicator may not be necessary and should be removed."
  },
  {
   "id": "reform-action-financially-viable-utilities-11",

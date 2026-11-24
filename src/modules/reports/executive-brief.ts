@@ -12,6 +12,7 @@ export const HEADLINE_KPI_CODES = [
 
 export const BRIEF_BOTTLENECK_LIMIT = 5;
 export const BRIEF_ACTION_LIMIT = 5;
+export const BRIEF_COMPLETED_ACTION_SLOTS = 2;
 
 const SEVERITY_ORDER = ["CRITICAL", "HIGH", "MEDIUM", "LOW"];
 const ACTION_STATUS_ORDER = [
@@ -117,6 +118,9 @@ export interface BriefData {
     projectsAtRisk: number;
     criticalBottlenecks: number;
     delayedActions: number;
+    completedActions: number;
+    totalActions: number;
+    improvingIndicators: number;
   };
   indicators: BriefIndicator[];
   pillars: BriefPillar[];

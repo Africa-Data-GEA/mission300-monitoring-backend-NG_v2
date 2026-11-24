@@ -5,7 +5,7 @@ const pageCount = (pdf: Buffer) => (pdf.toString("latin1").match(/\/Type \/Page\
 
 function brief(overrides: Partial<BriefData> = {}): BriefData {
   return {
-    glance: { indicatorsReported: 8, indicatorsTotal: 9, projectsAtRisk: 4, criticalBottlenecks: 2, delayedActions: 6 },
+    glance: { indicatorsReported: 8, indicatorsTotal: 9, projectsAtRisk: 4, criticalBottlenecks: 2, delayedActions: 6, completedActions: 4, totalActions: 12, improvingIndicators: 5 },
     indicators: [
       { name: "Electricity Access Rate", value: "63.7%", period: "2026", change: "+0.8 pts", tone: "good", target: null },
       { name: "ATC&C Loss Rate", value: "34.8%", period: "Q2 2026", change: "+0.6 pts", tone: "bad", target: null },

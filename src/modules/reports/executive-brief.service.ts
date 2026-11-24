@@ -6,6 +6,7 @@ import { formatPeriodLabel } from "@/modules/kpi-explorer/kpi-explorer.mappers";
 import { matchesPillars, type ReportConfigLike } from "@/modules/reports/reports.mappers";
 import {
   BRIEF_ACTION_LIMIT,
+  BRIEF_COMPLETED_ACTION_SLOTS,
   BRIEF_BOTTLENECK_LIMIT,
   HEADLINE_KPI_CODES,
   changeTone,
@@ -40,6 +41,8 @@ export function toBriefSections(brief: BriefData): BriefSection[] {
         ["Projects at risk, delayed or blocked", String(glance.projectsAtRisk)],
         ["Open critical or high bottlenecks", String(glance.criticalBottlenecks)],
         ["Priority actions delayed or at risk", String(glance.delayedActions)],
+      ["Priority actions completed", `${glance.completedActions} of ${glance.totalActions}`],
+      ["Headline indicators improving", String(glance.improvingIndicators)],
       ],
     },
     {
@@ -76,7 +79,7 @@ export function toBriefSections(brief: BriefData): BriefSection[] {
       columns: ["Action", "Lead institution", "Due", "Status"],
       rows: brief.actions.length
         ? brief.actions.map((item) => [item.action, item.lead || "—", item.due ?? "—", item.status])
-        : [["No reform actions are outstanding.", "—", "—", "—"]],
+        : [["No priority actions are recorded.", "—", "—", "—"]],
     },
   ];
 }
@@ -100,6 +103,9 @@ export class ExecutiveBriefService {
         projectsAtRisk: pillars.atRiskProjects,
         criticalBottlenecks: bottlenecks.open,
         delayedActions: actions.delayed,
+        completedActions: actions.completed,
+        totalActions: actions.total,
+        improvingIndicators: indicators.items.filter((indicator) => indicator.tone === "good").length,
       },
       indicators: indicators.items,
       pillars: pillars.items,
@@ -202,23 +208,26 @@ export class ExecutiveBriefService {
   }
 
   private async priorityActions(config: ReportConfigLike) {
-    const records = await this.prisma.reformAction.findMany({
-      where: { status: { not: "COMPLETED" } },
-      include: { pillar: true },
-    });
+    const records = await this.prisma.reformAction.findMany({ include: { pillar: true } });
     const scoped = records.filter((record) => matchesPillars(config, record.pillar.slug));
-    const delayed = scoped.filter(
-      (record) => record.isPriority && (record.status === "DELAYED" || record.status === "IN_PROGRESS_AT_RISK"),
-    ).length;
-    const items: BriefAction[] = rankActions(scoped)
-      .slice(0, BRIEF_ACTION_LIMIT)
-      .map((record) => ({
-        action: record.action,
-        lead: record.leadInstitution,
-        due: record.dueDate ? record.dueDate.toISOString().slice(0, 10) : null,
-        status: toKebabCase(record.status),
-      }));
+    const priority = scoped.filter((record) => record.isPriority);
+    const pool = priority.length > 0 ? priority : scoped;
+    const delayed = pool.filter((record) => record.status === "DELAYED" || record.status === "IN_PROGRESS_AT_RISK").length;
 
-    return { delayed, items };
+    const open = rankActions(pool.filter((record) => record.status !== "COMPLETED"));
+    const done = pool
+      .filter((record) => record.status === "COMPLETED")
+      .sort((a, b) => (b.completedAt ?? b.updatedAt).getTime() - (a.completedAt ?? a.updatedAt).getTime());
+    const openShown = open.slice(0, done.length > 0 ? BRIEF_ACTION_LIMIT - BRIEF_COMPLETED_ACTION_SLOTS : BRIEF_ACTION_LIMIT);
+    const shown = [...openShown, ...done.slice(0, BRIEF_ACTION_LIMIT - openShown.length)];
+
+    const items: BriefAction[] = shown.map((record) => ({
+      action: record.action,
+      lead: record.leadInstitution,
+      due: record.dueDate ? record.dueDate.toISOString().slice(0, 10) : null,
+      status: toKebabCase(record.status),
+    }));
+
+    return { delayed, completed: done.length, total: pool.length, items };
   }
 }

@@ -68,6 +68,7 @@ const ACTION_STYLE: Record<string, { label: string; color: string }> = {
   "in-progress-minor-delays": { label: "MINOR DELAYS", color: AMBER },
   "in-progress-on-track": { label: "ON TRACK", color: GOOD },
   "not-yet-due": { label: "NOT YET DUE", color: GREY },
+  completed: { label: "COMPLETED", color: GOOD },
 };
 
 const TONE_COLOR: Record<BriefTone, string> = { good: GOOD, bad: BAD, neutral: GREY };
@@ -137,14 +138,16 @@ function drawGlance(doc: Doc, brief: BriefData, y: number, contentWidth: number)
   const tiles: { value: string; label: string; color: string }[] = [
     {
       value: `${glance.indicatorsReported}/${glance.indicatorsTotal}`,
-      label: "Headline indicators reported",
+      label: "Indicators reported",
       color: glance.indicatorsReported === glance.indicatorsTotal ? GOOD : AMBER,
     },
-    { value: String(glance.projectsAtRisk), label: "Projects at risk, delayed or blocked", color: glance.projectsAtRisk > 0 ? AMBER : GOOD },
-    { value: String(glance.criticalBottlenecks), label: "Open critical or high bottlenecks", color: glance.criticalBottlenecks > 0 ? BAD : GOOD },
-    { value: String(glance.delayedActions), label: "Priority actions delayed or at risk", color: glance.delayedActions > 0 ? BAD : GOOD },
+    { value: String(glance.improvingIndicators), label: "Indicators improving", color: GOOD },
+    { value: String(glance.projectsAtRisk), label: "Projects at risk", color: glance.projectsAtRisk > 0 ? AMBER : GOOD },
+    { value: String(glance.criticalBottlenecks), label: "Critical bottlenecks", color: glance.criticalBottlenecks > 0 ? BAD : GOOD },
+    { value: `${glance.completedActions}/${glance.totalActions}`, label: "Actions completed", color: GOOD },
+    { value: String(glance.delayedActions), label: "Actions delayed or at risk", color: glance.delayedActions > 0 ? BAD : GOOD },
   ];
-  const width = (contentWidth - GRID_GAP * 3) / 4;
+  const width = (contentWidth - GRID_GAP * 5) / 6;
   tiles.forEach((tile, index) => {
     const x = MARGIN + index * (width + GRID_GAP);
     doc.roundedRect(x, y, width, TILE_HEIGHT, 4).fill(SURFACE);
@@ -321,7 +324,7 @@ export function renderExecutiveBriefPdf(input: BriefPdfInput): Promise<Buffer> {
   }
 
   if (brief.actions.length === 0) {
-    drawEmptyItem(doc, "No reform actions are outstanding.", rightX, y, columnWidth);
+    drawEmptyItem(doc, "No priority actions are recorded.", rightX, y, columnWidth);
   } else {
     brief.actions.slice(0, maxItems).forEach((item, index) => {
       const style = ACTION_STYLE[item.status] ?? { label: item.status.toUpperCase(), color: GREY };
