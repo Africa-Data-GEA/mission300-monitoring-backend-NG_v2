@@ -16,7 +16,6 @@ export const envSchema = z.object({
   JWT_ACCESS_TTL: z.string().default("15m"),
   JWT_REFRESH_TTL: z.string().default("7d"),
 
-  REMINDERS_ENABLED: z.enum(["true", "false"]).or(z.literal("")).default("false"),
   REMINDERS_OVERDUE_LIMIT_DAYS: z.coerce.number().int().positive().default(90),
 
   STORAGE_DRIVER: z.enum(["local"]).default("local"),

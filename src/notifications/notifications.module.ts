@@ -9,12 +9,13 @@ import { AdministrationModule } from "@/modules/administration/administration.mo
 import { RemindersController } from "@/notifications/reminders/reminders.controller";
 import { RemindersRunner } from "@/notifications/reminders/reminders-runner";
 import { RemindersService } from "@/notifications/reminders/reminders.service";
+import { ReminderSettingsService } from "@/notifications/reminders/reminder-settings.service";
 
 // EmailService is NOT provided here - it's global (see email.module.ts).
 @Module({
   imports: [AuthModule, AdministrationModule], // AdministrationModule for BrandingService
   controllers: [WebhooksController, NotificationsFeedController, RemindersController],
-  providers: [WebhooksService, NotificationsConsumer, NotificationsFeedService, RemindersService, RemindersRunner],
+  providers: [WebhooksService, NotificationsConsumer, NotificationsFeedService, RemindersService, RemindersRunner, ReminderSettingsService],
   exports: [WebhooksService],
 })
 export class NotificationsModule {}
