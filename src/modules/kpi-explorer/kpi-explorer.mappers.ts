@@ -247,6 +247,9 @@ export function toKpiProfile(kpi: KpiWithFullProfile, allKpiValues: ValueWithPro
     direction,
     trend,
     history,
+    annualValues: chronological
+      .filter((v) => /^\d{4}$/.test(v.period))
+      .map((v) => ({ period: v.period, value: toNumber(v.value) ?? 0 })),
 
     sourceInstitution: kpi.sourceInstitution || "Not supplied",
     sourceInstitutions: toResolvedSourceInstitutions(kpi),

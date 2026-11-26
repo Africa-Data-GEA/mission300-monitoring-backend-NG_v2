@@ -1,3 +1,5 @@
+import { join } from "node:path";
+import { readFileSync } from "node:fs";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@prisma/client";
 
@@ -5,6 +7,13 @@ const KPI_CODE = "M300-P1-004";
 const CDMU_INSTITUTION_ID = "seed-institution-cdmu";
 const CDMU_NAME = "Compact Delivery and Monitoring Unit (CDMU)";
 const RETIRED_DATASET_ID = "niso-renewable-generation-mix";
+const CAPITAL_CODE = "M300-P4-002";
+const DIRECTORY_PATH = join(process.cwd(), "prisma", "data", "kpi-directory.json");
+
+interface DirectoryEntry {
+  code: string;
+  targetPoints: { period: string; value: number; label: string }[];
+}
 
 async function main() {
   const prisma = new PrismaClient({ adapter: new PrismaPg(process.env.DATABASE_URL as string) });
@@ -40,6 +49,15 @@ async function main() {
   });
   await prisma.kpiSourceInstitution.deleteMany({ where: { kpiDefinitionId: kpi.id } });
   await prisma.kpiSourceInstitution.create({ data: { kpiDefinitionId: kpi.id, institutionId: cdmu.id } });
+
+  const directory = JSON.parse(readFileSync(DIRECTORY_PATH, "utf-8")) as DirectoryEntry[];
+  for (const code of [KPI_CODE, CAPITAL_CODE]) {
+    const points = directory.find((entry) => entry.code === code)?.targetPoints ?? [];
+    const target = await prisma.kpiDefinition.findUnique({ where: { code } });
+    if (!target || points.length === 0) continue;
+    await prisma.kpiTargetPoint.deleteMany({ where: { kpiDefinitionId: target.id } });
+    await prisma.kpiTargetPoint.createMany({ data: points.map((point) => ({ kpiDefinitionId: target.id, ...point })) });
+  }
 
   await prisma.dataset.updateMany({ where: { id: RETIRED_DATASET_ID }, data: { isActive: false } });
   const obligations = await prisma.obligation.deleteMany({

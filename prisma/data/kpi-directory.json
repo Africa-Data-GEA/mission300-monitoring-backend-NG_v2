@@ -216,33 +216,33 @@
     "targetPoints": [
       {
         "period": "2025",
-        "value": 29,
-        "label": "29% by 2025 (Cycle 1 2026 Compact Progress Report)"
+        "value": 30,
+        "label": "30% by 2025 (CDMU Compact Progress Report)"
       },
       {
         "period": "2026",
-        "value": 29.83,
-        "label": "29.83% by 2026 (Cycle 1 2026 Compact Progress Report)"
+        "value": 34,
+        "label": "34% by 2026 (CDMU Compact Progress Report)"
       },
       {
         "period": "2027",
-        "value": 30.67,
-        "label": "30.67% by 2027 (Cycle 1 2026 Compact Progress Report)"
+        "value": 38,
+        "label": "38% by 2027 (CDMU Compact Progress Report)"
       },
       {
         "period": "2028",
-        "value": 31.5,
-        "label": "31.5% by 2028 (Cycle 1 2026 Compact Progress Report)"
+        "value": 42,
+        "label": "42% by 2028 (CDMU Compact Progress Report)"
       },
       {
         "period": "2029",
-        "value": 33,
-        "label": "33% by 2029 (Cycle 1 2026 Compact Progress Report)"
+        "value": 46,
+        "label": "46% by 2029 (CDMU Compact Progress Report)"
       },
       {
         "period": "2030",
-        "value": 34,
-        "label": "34% by 2030 (Cycle 1 2026 Compact Progress Report interim checkpoint — the 75% target above is the Compact's separate end-value commitment, beyond this report's 2030 column)"
+        "value": 50,
+        "label": "50% by 2030 (CDMU Compact Progress Report)"
       }
     ]
   },
@@ -804,6 +804,11 @@
         "period": "2029",
         "value": 2583.3,
         "label": "USD 2,583.3 million by 2029 (Cycle 1 2026 Compact Progress Report)"
+      },
+      {
+        "period": "2030",
+        "value": 2583.3,
+        "label": "US$2,583.3 million in 2030 (CDMU Compact Progress Report)"
       }
     ]
   },
