@@ -193,7 +193,7 @@ export class ExecutiveOverviewService {
     const nationalPerformanceAll = [
       this.buildBulletMetric(renewableProfile, {
         id: "renewable-share",
-        caption: "Annual: CDMU Compact Progress Report. Quarters: NISO generation data",
+        caption: "Source: CDMU Compact Progress Report",
       }),
       this.buildBulletMetric(meteringProfile, { id: "metering-rate" }),
       this.buildBulletMetric(atccProfile, { id: "atcc-losses", caption: "Lower is better" }),

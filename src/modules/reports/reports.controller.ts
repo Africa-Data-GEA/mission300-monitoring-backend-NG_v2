@@ -1,6 +1,7 @@
 import { Body, Controller, Delete, Get, HttpCode, Param, Post, Query, StreamableFile } from "@nestjs/common";
 import { ApiTags, ApiBearerAuth } from "@nestjs/swagger";
 import { ReportsService } from "@/modules/reports/reports.service";
+import { CompactWorksheetTemplateService } from "@/modules/reports/compact-worksheet-template.service";
 import { ReportsQueryDto } from "@/modules/reports/dto/reports-query.dto";
 import { ReportConfigDto } from "@/modules/reports/dto/report-config.dto";
 import { CurrentUser, type AuthenticatedUser } from "@/common/decorators/current-user.decorator";
@@ -20,7 +21,10 @@ import { OPERATIONAL_MANAGERS } from "@/common/guards/operational-scope";
 @ApiBearerAuth()
 @Controller("reports")
 export class ReportsController {
-  constructor(private readonly reports: ReportsService) {}
+  constructor(
+    private readonly reports: ReportsService,
+    private readonly worksheetTemplate: CompactWorksheetTemplateService,
+  ) {}
 
   @Get("filters")
   getFilters() {
@@ -35,6 +39,15 @@ export class ReportsController {
   @Get("methodology")
   getMethodology() {
     return this.reports.getMethodology();
+  }
+
+  @Get("compact-progress-worksheet-template")
+  @Roles("SYSTEM_ADMINISTRATOR", "DASHBOARD_MANAGER", "OVERSIGHT_USER")
+  async getCompactWorksheetTemplate() {
+    return new StreamableFile(await this.worksheetTemplate.read(), {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      disposition: 'attachment; filename="compact-progress-worksheet.xlsx"',
+    });
   }
 
   @Post("preview")

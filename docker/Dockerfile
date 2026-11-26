@@ -27,6 +27,7 @@ ENV NODE_ENV=production
 RUN addgroup -S app && adduser -S app -G app
 COPY --chown=app:app --from=build /app/node_modules ./node_modules
 COPY --chown=app:app --from=build /app/dist ./dist
+COPY --chown=app:app --from=build /app/assets ./assets
 COPY --chown=app:app --from=build /app/prisma ./prisma
 COPY --chown=app:app --from=build /app/prisma.config.ts ./prisma.config.ts
 COPY --chown=app:app --from=build /app/package.json ./package.json

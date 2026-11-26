@@ -16,6 +16,7 @@ import { BottlenecksController } from "@/modules/bottlenecks/bottlenecks.control
 import { BottlenecksService } from "@/modules/bottlenecks/bottlenecks.service";
 import { ReportsController } from "@/modules/reports/reports.controller";
 import { ReportsService } from "@/modules/reports/reports.service";
+import { CompactWorksheetTemplateService } from "@/modules/reports/compact-worksheet-template.service";
 import { AuthController } from "@/modules/auth/auth.controller";
 import { AuthService } from "@/modules/auth/auth.service";
 import { WebhooksController } from "@/notifications/webhooks/webhooks.controller";
@@ -92,6 +93,7 @@ describe("HTTP security audit (isolated app, no database)", () => {
         { provide: ProgramsService, useValue: writes },
         { provide: BottlenecksService, useValue: writes },
         { provide: ReportsService, useValue: writes },
+        { provide: CompactWorksheetTemplateService, useValue: writes },
         { provide: AuthService, useValue: { identify: jest.fn(async ({ email }) => ({ email })) } },
         { provide: WebhooksService, useValue: writes },
         JwtStrategy,

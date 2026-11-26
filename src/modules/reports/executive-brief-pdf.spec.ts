@@ -17,7 +17,7 @@ function brief(overrides: Partial<BriefData> = {}): BriefData {
       { name: "Clean cooking", projects: 0, onTrack: 0, atRisk: 0, bottlenecks: 0 },
     ],
     bottlenecks: [{ issue: "Right-of-way delays on the Abuja ring main", severity: "critical", pillar: "Generation & network", ageDays: 120, status: "open" }],
-    actions: [{ action: "Deployment of SCADA systems", lead: "TCN", due: "2026-12-31", status: "delayed" }],
+    actions: [{ action: "Deployment of SCADA systems", lead: "TCN", due: "2026-12-31", status: "completed" }],
     ...overrides,
   };
 }
@@ -78,8 +78,9 @@ describe("renderExecutiveBriefPdf", () => {
 });
 
 describe("sanitizeBriefText", () => {
-  it("replaces characters the built-in PDF fonts cannot draw", () => {
-    expect(sanitizeBriefText("−2.4 pts — ‘quoted’")).toBe("-2.4 pts - 'quoted'");
-    expect(sanitizeBriefText("tariff ₦ 124")).toBe("tariff ? 124");
+  it("keeps typography the embedded font can draw and spells out the rest", () => {
+    expect(sanitizeBriefText("−2.4 pts — ‘quoted’")).toBe("−2.4 pts — ‘quoted’");
+    expect(sanitizeBriefText("tariff ₦ 124")).toBe("tariff NGN 124");
+    expect(sanitizeBriefText("done ✓")).toBe("done ?");
   });
 });

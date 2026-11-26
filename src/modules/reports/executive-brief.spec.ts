@@ -1,4 +1,4 @@
-import { changeTone, formatBriefChange, formatBriefValue, rankActions, rankBottlenecks } from "./executive-brief";
+import { changeTone, formatBriefChange, formatBriefValue, rankBottlenecks, selectProgressingActions } from "./executive-brief";
 
 describe("formatBriefValue", () => {
   it("shows percentages to one decimal with a % sign", () => {
@@ -45,22 +45,18 @@ describe("rankBottlenecks", () => {
   });
 });
 
-describe("rankActions", () => {
-  it("lists priority actions first, then the most behind, then the earliest due", () => {
-    const ranked = rankActions([
-      { id: "plain-delayed", isPriority: false, status: "DELAYED", dueDate: new Date("2026-01-01") },
-      { id: "priority-on-track", isPriority: true, status: "IN_PROGRESS_ON_TRACK", dueDate: new Date("2026-03-01") },
-      { id: "priority-delayed-late", isPriority: true, status: "DELAYED", dueDate: new Date("2026-09-01") },
-      { id: "priority-delayed-early", isPriority: true, status: "DELAYED", dueDate: new Date("2026-02-01") },
-      { id: "priority-no-date", isPriority: true, status: "DELAYED", dueDate: null },
+describe("selectProgressingActions", () => {
+  it("keeps only completed and on-track actions, completed first, then by due date", () => {
+    const selected = selectProgressingActions([
+      { id: "delayed", status: "DELAYED", dueDate: new Date("2026-01-01") },
+      { id: "on-track-late", status: "IN_PROGRESS_ON_TRACK", dueDate: new Date("2026-09-01") },
+      { id: "at-risk", status: "IN_PROGRESS_AT_RISK", dueDate: null },
+      { id: "minor-delays", status: "IN_PROGRESS_MINOR_DELAYS", dueDate: null },
+      { id: "not-due", status: "NOT_YET_DUE", dueDate: null },
+      { id: "completed", status: "COMPLETED", dueDate: new Date("2026-12-01") },
+      { id: "on-track-early", status: "IN_PROGRESS_ON_TRACK", dueDate: new Date("2026-02-01") },
     ]);
-    expect(ranked.map((record) => record.id)).toEqual([
-      "priority-delayed-early",
-      "priority-delayed-late",
-      "priority-no-date",
-      "priority-on-track",
-      "plain-delayed",
-    ]);
+    expect(selected.map((record) => record.id)).toEqual(["completed", "on-track-early", "on-track-late"]);
   });
 });
 

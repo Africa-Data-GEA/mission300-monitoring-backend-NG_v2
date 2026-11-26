@@ -10,18 +10,10 @@ export const HEADLINE_KPI_CODES = [
   "M300-P2-006",
 ] as const;
 
-export const BRIEF_BOTTLENECK_LIMIT = 5;
-export const BRIEF_ACTION_LIMIT = 5;
-export const BRIEF_COMPLETED_ACTION_SLOTS = 2;
+export const BRIEF_BOTTLENECK_LIMIT = 8;
 
 const SEVERITY_ORDER = ["CRITICAL", "HIGH", "MEDIUM", "LOW"];
-const ACTION_STATUS_ORDER = [
-  "DELAYED",
-  "IN_PROGRESS_AT_RISK",
-  "IN_PROGRESS_MINOR_DELAYS",
-  "IN_PROGRESS_ON_TRACK",
-  "NOT_YET_DUE",
-];
+const PROGRESSING_STATUS_ORDER = ["COMPLETED", "IN_PROGRESS_ON_TRACK"];
 
 const UNITLESS = new Set(["", "number", "count"]);
 
@@ -67,14 +59,11 @@ export function rankBottlenecks<T extends { severity: string; dateRaised: Date }
   );
 }
 
-export function rankActions<T extends { isPriority: boolean; status: string; dueDate: Date | null }>(records: readonly T[]): T[] {
+export function selectProgressingActions<T extends { status: string; dueDate: Date | null }>(records: readonly T[]): T[] {
   const due = (record: T) => record.dueDate?.getTime() ?? Number.POSITIVE_INFINITY;
-  return [...records].sort(
-    (a, b) =>
-      Number(b.isPriority) - Number(a.isPriority) ||
-      rank(ACTION_STATUS_ORDER, a.status) - rank(ACTION_STATUS_ORDER, b.status) ||
-      due(a) - due(b),
-  );
+  return records
+    .filter((record) => PROGRESSING_STATUS_ORDER.includes(record.status))
+    .sort((a, b) => rank(PROGRESSING_STATUS_ORDER, a.status) - rank(PROGRESSING_STATUS_ORDER, b.status) || due(a) - due(b));
 }
 
 export type BriefTone = "good" | "bad" | "neutral";

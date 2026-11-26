@@ -129,6 +129,7 @@ model User {
   reviewingSubmissions Submission[]      @relation("SubmissionReviewer")
   entryDrafts          EntryDraft[]      @relation("EntryDraftSavedBy")
   notifications        Notification[]
+  reminderLogs         ReminderLog[]
 
   @@index([institutionId])
   @@index([roles], type: Gin)
@@ -141,6 +142,18 @@ model SecuritySettings {
   updatedAt       DateTime @updatedAt
 
   @@map("security_settings")
+}
+
+model ReminderLog {
+  id     String   @id @default(cuid())
+  userId String
+  user   User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  key    String
+  sentAt DateTime @default(now())
+
+  @@unique([userId, key])
+  @@index([userId, sentAt])
+  @@map("reminder_logs")
 }
 
 model Notification {

@@ -40,6 +40,7 @@ const ORDER = [
   "ingest-reform-actions",
   "ingest-q3-2026-reform-action-update",
   "ingest-cdmu-datasets",
+  "ingest-cdmu-renewable-share",
   "backfill-institution-traceability",
   "link-duplicate-kpis",
 ];

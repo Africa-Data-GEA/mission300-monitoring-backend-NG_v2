@@ -17,7 +17,11 @@ export interface SendEmailInput {
 export interface SendEmailResult {
   sent: boolean;
   reason?: string;
+  skipped?: boolean;
 }
+
+const RETRY_DELAYS_MS = [1_000, 4_000];
+const RETRYABLE_ERRORS = new Set(["rate_limit_exceeded", "application_error", "internal_server_error"]);
 
 /**
  * Thin Resend wrapper. RESEND_API_KEY is optional at boot (see
@@ -45,16 +49,22 @@ export class EmailService {
     if (!this.resend) {
       // Recovery/invitation URLs are credentials, including in development.
       this.logger.log("Email skipped: delivery provider is not configured");
-      return { sent: false, reason: "Email delivery is not configured" };
+      return { sent: false, skipped: true, reason: "Email delivery is not configured" };
     }
 
-    const { error } = await this.resend.emails.send({
+    const message = {
       from: this.from,
       to,
       subject,
       html,
       ...(attachments?.length ? { attachments } : {}),
-    });
+    };
+    let { error } = await this.resend.emails.send(message);
+    for (const delay of RETRY_DELAYS_MS) {
+      if (!error || !RETRYABLE_ERRORS.has(error.name)) break;
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      ({ error } = await this.resend.emails.send(message));
+    }
     if (error) {
       this.logger.error("Email provider rejected delivery");
       return { sent: false, reason: "The email provider rejected the message" };

@@ -82,18 +82,8 @@ function resolveLogoUrl(logoUrl: string): string {
   return `${base}${logoUrl}`;
 }
 
-// Same partner credit shown in the landing page's own footer (public-footer.tsx):
-// SEforALL and GEAPP as delivery partners on the left, EMRC credited alone as
-// platform builder on the right. These are fixed - unlike the primary colour
-// and logo, they aren't part of BrandingSettings and don't change per admin.
-// SEforALL's mark is multi-colour by default (only inverted to white in-app
-// via a CSS filter for its navy footer - not something an email can rely on),
-// so it's used as-is here since this footer stays light. GEAPP's file is the
-// opposite problem - solid white with a transparent background, invisible
-// without a dark backdrop - so it gets a small chip in the brand's primary
-// colour, the same fix the header gives the coat of arms in reverse.
-const seforallUrl = `${frontendBase}/seforall.svg`;
-const geappUrl = `${frontendBase}/reports/compact-progress/logo-geapp.png`;
+const seforallUrl = `${frontendBase}/Logos/partners/seforall-color.png`;
+const geappUrl = `${frontendBase}/Logos/partners/geapp-color.png`;
 const emrcUrl = `${frontendBase}/emrc.png`;
 
 /** Escapes user-controlled strings before they're interpolated into HTML. */
@@ -174,19 +164,13 @@ export function renderLayout(title: string, bodyHtml: string, brand: EmailBrand,
                       <table role="presentation" cellpadding="0" cellspacing="0">
                         <tr>
                           <td style="vertical-align: middle;">
-                            <img src="${seforallUrl}" alt="SEforALL" width="26" style="display: block; width: 26px; height: auto; border: 0;" />
+                            <img src="${seforallUrl}" alt="SEforALL" width="64" style="display: block; width: 64px; height: auto; border: 0;" />
                           </td>
                           <td style="width: 7px; font-size: 0; line-height: 0;">&nbsp;</td>
                           <td style="width: 1px; background-color: ${token.borderDefault}; font-size: 0; line-height: 0;">&nbsp;</td>
                           <td style="width: 7px; font-size: 0; line-height: 0;">&nbsp;</td>
                           <td style="vertical-align: middle;">
-                            <table role="presentation" cellpadding="0" cellspacing="0" style="background-color: ${brand.primaryColor}; border-radius: 3px;">
-                              <tr>
-                                <td style="padding: 3px 4px;">
-                                  <img src="${geappUrl}" alt="GEAPP" width="20" style="display: block; width: 20px; height: auto; border: 0;" />
-                                </td>
-                              </tr>
-                            </table>
+                            <img src="${geappUrl}" alt="GEAPP" width="104" style="display: block; width: 104px; height: auto; border: 0;" />
                           </td>
                         </tr>
                       </table>

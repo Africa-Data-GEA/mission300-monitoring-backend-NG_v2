@@ -26,7 +26,7 @@ const DATASETS: DatasetSpec[] = [
   {
     id: "cdmu-compact-progress",
     name: "CDMU Compact Progress Report",
-    purpose: "National access figures reported in the Compact Progress Report.",
+    purpose: "National access and renewable generation figures reported in the Compact Progress Report.",
     frequency: "Annual",
     pillarSlug: "last-mile-access",
     sectionTitle: "Compact Progress Report",
@@ -54,6 +54,12 @@ const DATASETS: DatasetSpec[] = [
         helpText: "Number of people without access to clean cooking, as stated in the Compact Progress Report.",
         unit: "people",
         kpiCode: "M300-P2-012",
+      },
+      {
+        label: "Renewable Generation Share",
+        helpText: "Share of electricity generated from renewable sources, as stated in the Compact Progress Report.",
+        unit: "%",
+        kpiCode: "M300-P1-004",
       },
     ],
   },

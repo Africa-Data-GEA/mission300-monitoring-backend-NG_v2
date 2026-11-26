@@ -5,30 +5,15 @@ import { PrismaClient } from "@prisma/client";
 
 /**
  * Ingests the generation sheets of "EMRC - NISO Compiled Data 2020-2026 v1
- * 2026-09-11.xlsx" into the two Generation & Network KPIs they actually
- * support:
+ * 2026-09-11.xlsx" into M300-P1-005 "Actual Generation Sent to the Grid"
+ * (GWh): the sum of the "Genco Energy Export" sheet plus the separately
+ * tracked "Zungeru Energy Exports" sheet, per quarter.
  *
- * - M300-P1-005 "Actual Generation Sent to the Grid" (GWh) - the sum of the
- *   "Genco Energy Export" sheet plus the separately-tracked "Zungeru Energy
- *   Exports" sheet, per quarter.
- * - M300-P1-004 "Renewable Generation Share" (%) - hydro generation divided
- *   by total generation, per quarter.
+ * M300-P1-004 "Renewable Generation Share" is NOT written here: the CDMU
+ * supplies it (see ingest-cdmu-renewable-share.ts).
  *
- * M300-P1-004's formula is explicitly GWh/GWh ("Total renewable generation
- * GWh / total generation GWh"). It had previously been backfilled from
- * INSTALLED CAPACITY (MW/MW) by ingest-national-rollup-kpis.ts, which is a
- * different quantity and belongs in M300-P1-015 "Renewable Installed
- * Capacity Share (Canonical)" - that script now writes it there instead.
- *
- * Fuel classification is not invented here: it comes from the Source column
- * (THERMAL/HYDRO) of the NERC workbook's own "Genco Installed Capacity"
- * sheet. The NISO sheets name the OPERATING COMPANY while NERC names the
- * PLANT, so companies are matched to plants by name containment, with an
- * explicit alias table below for the two that share no text with their
- * plant. Nigeria has five hydro plants (Dadin Kowa, Jebba, Kainji, Shiroro,
- * Zungeru) and this mapping accounts for all five; every company left
- * unclassified is gas/thermal, so it affects only the denominator's
- * labelling, never the renewable numerator.
+ * Companies are still classified by fuel so that an unrecognised company
+ * stops the run rather than going unnoticed.
  *
  * Idempotent: deterministic ids derived from (kpiCode, period).
  *
@@ -313,19 +298,12 @@ async function main() {
     }
     await backfillOne("M300-P1-005", period, totals.totalKwh / 1e6, "Genco Energy Export + Zungeru Energy Exports");
     written++;
-    await backfillOne(
-      "M300-P1-004",
-      period,
-      (totals.hydroKwh / totals.totalKwh) * 100,
-      "hydro generation / total generation, fuel type per the NERC Genco Installed Capacity sheet",
-    );
-    written++;
   }
 
   if (partialQuarters.length > 0) {
     console.log(`Skipped incomplete quarter(s): ${partialQuarters.join(", ")}`);
   }
-  console.log(`KpiValue backfill complete: ${written} values across M300-P1-005 and M300-P1-004.`);
+  console.log(`KpiValue backfill complete: ${written} values for M300-P1-005.`);
   await prisma.$disconnect();
 }
 

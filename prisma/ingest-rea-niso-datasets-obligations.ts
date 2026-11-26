@@ -105,18 +105,6 @@ const DATASETS: DatasetSpec[] = [
     ],
   },
   {
-    id: "niso-renewable-generation-mix",
-    name: "NISO Renewable Generation Mix",
-    purpose: "Share of total electricity generation coming from renewable sources.",
-    frequency: "Annual",
-    ownerInstitutionId: NISO_INSTITUTION_ID,
-    pillarSlug: "generation-network",
-    sectionTitle: "Generation mix",
-    fields: [
-      { label: "Renewable Generation Share", helpText: "Renewable (hydro, solar, wind) generation as a share of total generation for the reporting year.", unit: "%", kpiCode: "M300-P1-004" },
-    ],
-  },
-  {
     id: "niso-network-capacity-pipeline",
     name: "NISO Network & Capacity Pipeline",
     purpose: "Transmission network capacity and the generation capacity pipeline NISO plans against.",

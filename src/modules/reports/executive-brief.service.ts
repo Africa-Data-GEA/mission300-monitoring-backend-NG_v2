@@ -5,14 +5,12 @@ import { compareReportingValues } from "@/common/utils/reporting-period";
 import { formatPeriodLabel } from "@/modules/kpi-explorer/kpi-explorer.mappers";
 import { matchesPillars, type ReportConfigLike } from "@/modules/reports/reports.mappers";
 import {
-  BRIEF_ACTION_LIMIT,
-  BRIEF_COMPLETED_ACTION_SLOTS,
   BRIEF_BOTTLENECK_LIMIT,
   HEADLINE_KPI_CODES,
   changeTone,
   formatBriefChange,
   formatBriefValue,
-  rankActions,
+  selectProgressingActions,
   rankBottlenecks,
   type BriefAction,
   type BriefBottleneck,
@@ -75,11 +73,11 @@ export function toBriefSections(brief: BriefData): BriefSection[] {
         : [["No open bottlenecks are recorded.", "—", "—", "—", "—"]],
     },
     {
-      title: "Priority actions",
+      title: "Priority actions: completed and on track",
       columns: ["Action", "Lead institution", "Due", "Status"],
       rows: brief.actions.length
         ? brief.actions.map((item) => [item.action, item.lead || "—", item.due ?? "—", item.status])
-        : [["No priority actions are recorded.", "—", "—", "—"]],
+        : [["No priority actions are completed or on track.", "—", "—", "—"]],
     },
   ];
 }
@@ -214,12 +212,8 @@ export class ExecutiveBriefService {
     const pool = priority.length > 0 ? priority : scoped;
     const delayed = pool.filter((record) => record.status === "DELAYED" || record.status === "IN_PROGRESS_AT_RISK").length;
 
-    const open = rankActions(pool.filter((record) => record.status !== "COMPLETED"));
-    const done = pool
-      .filter((record) => record.status === "COMPLETED")
-      .sort((a, b) => (b.completedAt ?? b.updatedAt).getTime() - (a.completedAt ?? a.updatedAt).getTime());
-    const openShown = open.slice(0, done.length > 0 ? BRIEF_ACTION_LIMIT - BRIEF_COMPLETED_ACTION_SLOTS : BRIEF_ACTION_LIMIT);
-    const shown = [...openShown, ...done.slice(0, BRIEF_ACTION_LIMIT - openShown.length)];
+    const completed = pool.filter((record) => record.status === "COMPLETED").length;
+    const shown = selectProgressingActions(pool);
 
     const items: BriefAction[] = shown.map((record) => ({
       action: record.action,
@@ -228,6 +222,6 @@ export class ExecutiveBriefService {
       status: toKebabCase(record.status),
     }));
 
-    return { delayed, completed: done.length, total: pool.length, items };
+    return { delayed, completed, total: pool.length, items };
   }
 }

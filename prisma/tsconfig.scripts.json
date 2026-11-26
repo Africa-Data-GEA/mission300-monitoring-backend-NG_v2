@@ -23,6 +23,7 @@
     "ingest-reform-actions.ts",
     "ingest-q3-2026-reform-action-update.ts",
     "ingest-cdmu-datasets.ts",
+    "ingest-cdmu-renewable-share.ts",
     "ingest-niso-generation-kpis.ts",
     "ingest-derived-utility-kpis.ts",
     "ingest-niso-bilateral-kpi.ts",

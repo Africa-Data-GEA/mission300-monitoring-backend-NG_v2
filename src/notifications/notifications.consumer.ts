@@ -12,6 +12,7 @@ import {
   type EmailBrand,
 } from "@/notifications/email/templates";
 import { BrandingService } from "@/modules/administration/branding/branding.service";
+import { administratorWhere, reviewerWhere } from "@/notifications/recipients";
 import { REPORT_TYPE_LABELS } from "@/modules/reports/reports.mappers";
 import {
   AWAITING_REVIEW_TITLE,
@@ -233,21 +234,7 @@ export class NotificationsConsumer implements OnModuleInit {
     );
 
     const reviewers = await this.prisma.user.findMany({
-      where: {
-        status: "ACTIVE",
-        OR: [
-          { role: { in: ["DATA_REVIEWER", "VALIDATOR"] } },
-          { roles: { hasSome: ["DATA_REVIEWER", "VALIDATOR"] } },
-        ],
-        AND: [{
-          OR: [
-            { institutionId: submission.institutionId },
-            { reviewsAllInstitutions: true, institutionId: null },
-            { role: { in: ["SYSTEM_ADMINISTRATOR", "DASHBOARD_MANAGER", "OVERSIGHT_USER", "READ_ONLY_USER"] } },
-            { roles: { hasSome: ["SYSTEM_ADMINISTRATOR", "DASHBOARD_MANAGER", "OVERSIGHT_USER", "READ_ONLY_USER"] } },
-          ],
-        }],
-      },
+      where: { OR: [reviewerWhere(submission.institutionId), administratorWhere()] },
     });
     const awaitingReview = submissionAwaitingReviewEmail(
       {
