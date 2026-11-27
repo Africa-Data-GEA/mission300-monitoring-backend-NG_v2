@@ -101,6 +101,7 @@ export interface BriefAction {
 }
 
 export interface BriefData {
+  preparedFor?: string;
   glance: {
     indicatorsReported: number;
     indicatorsTotal: number;

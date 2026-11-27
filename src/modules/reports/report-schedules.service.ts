@@ -30,8 +30,19 @@ function timingOf(schedule: Pick<ReportSchedule, "cadence" | "dayOfWeek" | "dayO
   };
 }
 
-function configFor(pillars: string[] | undefined): ReportConfigDto {
+interface Audience {
+  institutionId?: string;
+  institutionName?: string;
+}
+
+function audienceOf(schedule: Pick<ReportSchedule, "config">): Audience {
+  const config = (schedule.config ?? {}) as Audience;
+  return config.institutionId ? { institutionId: config.institutionId, institutionName: config.institutionName } : {};
+}
+
+function configFor(pillars: string[] | undefined, audience: Audience = {}): ReportConfigDto & Audience {
   return {
+    ...(audience.institutionId ? { institutionId: audience.institutionId, institutionName: audience.institutionName } : {}),
     reportType: "EXECUTIVE_BRIEF",
     periods: ["all"],
     pillars: pillars?.length ? pillars : ["all"],
@@ -63,6 +74,8 @@ export function toScheduleResponse(schedule: ScheduleWithOwner) {
     description: describeSchedule(timingOf(schedule)),
     recipients: schedule.recipients,
     pillars: pillarsOf(schedule),
+    institutionId: audienceOf(schedule).institutionId ?? null,
+    institutionName: audienceOf(schedule).institutionName ?? null,
     isActive: schedule.isActive,
     nextRunAt: schedule.nextRunAt.toISOString(),
     lastRunAt: schedule.lastRunAt?.toISOString() ?? null,
@@ -99,12 +112,24 @@ export class ReportSchedulesService {
     return { items: schedules.map(toScheduleResponse) };
   }
 
+  async audiences() {
+    return this.prisma.institution.findMany({ select: { id: true, name: true }, orderBy: { name: "asc" } });
+  }
+
+  private async audienceFor(institutionId: string | undefined): Promise<Audience> {
+    if (!institutionId) return {};
+    const institution = await this.prisma.institution.findUnique({ where: { id: institutionId } });
+    if (!institution) throw new BadRequestException("Choose an agency that exists.");
+    return { institutionId: institution.id, institutionName: institution.name };
+  }
+
   async create(user: AuthenticatedUser, dto: ReportScheduleDto) {
+    const audience = await this.audienceFor(dto.institutionId);
     const timing = this.timingFrom(dto);
     const schedule = await this.prisma.reportSchedule.create({
       data: {
         name: dto.name.trim(),
-        config: configFor(dto.pillars) as unknown as Prisma.InputJsonValue,
+        config: configFor(dto.pillars, audience) as unknown as Prisma.InputJsonValue,
         cadence: timing.cadence,
         dayOfWeek: timing.dayOfWeek,
         dayOfMonth: timing.dayOfMonth,
@@ -121,12 +146,13 @@ export class ReportSchedulesService {
 
   async update(id: string, dto: ReportScheduleDto) {
     await this.requireSchedule(id);
+    const audience = await this.audienceFor(dto.institutionId);
     const timing = this.timingFrom(dto);
     const schedule = await this.prisma.reportSchedule.update({
       where: { id },
       data: {
         name: dto.name.trim(),
-        config: configFor(dto.pillars) as unknown as Prisma.InputJsonValue,
+        config: configFor(dto.pillars, audience) as unknown as Prisma.InputJsonValue,
         cadence: timing.cadence,
         dayOfWeek: timing.dayOfWeek,
         dayOfMonth: timing.dayOfMonth,
@@ -234,7 +260,7 @@ export class ReportSchedulesService {
         roles: creator.roles,
         institutionId: creator.institutionId,
       };
-      const generated = await this.reports.generate(actor, configFor(pillarsOf(schedule)), { notify: false });
+      const generated = await this.reports.generate(actor, configFor(pillarsOf(schedule), audienceOf(schedule)), { notify: false });
       savedReportId = generated.savedReport.id;
       reportingPeriod = generated.preview.metadata.reportingPeriod;
       pdf = await this.reports.getSavedPdf(savedReportId);

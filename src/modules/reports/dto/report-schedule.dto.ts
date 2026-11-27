@@ -57,6 +57,10 @@ export class ReportScheduleDto {
   pillars?: string[];
 
   @IsOptional()
+  @IsString()
+  institutionId?: string;
+
+  @IsOptional()
   @IsBoolean()
   isActive?: boolean;
 }

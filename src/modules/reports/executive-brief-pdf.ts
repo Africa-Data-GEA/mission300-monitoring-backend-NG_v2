@@ -116,7 +116,8 @@ function drawHeader(doc: Doc, input: BriefPdfInput, contentWidth: number, pageWi
     : generated.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
   const right = { width: contentWidth, align: "right" as const };
   write(doc, "Executive brief", MARGIN, 11, { size: 17, color: "#FFFFFF", weight: "bold", ...right });
-  write(doc, PLATFORM_NAME, MARGIN, 33, { size: 8, color: "#CFE0EC", ...right });
+  const preparedFor = input.brief.preparedFor ? `Prepared for ${input.brief.preparedFor}` : PLATFORM_NAME;
+  write(doc, preparedFor, MARGIN, 33, { size: 8, color: "#CFE0EC", ...right });
   write(doc, `Reporting period: ${input.reportingPeriod}   |   Prepared ${prepared}`, MARGIN, 44, {
     size: 8,
     color: "#CFE0EC",
@@ -211,8 +212,8 @@ function drawTable(
 
 function indicatorTable(brief: BriefData) {
   return {
-    title: "Headline indicators",
-    empty: "No headline indicators are selected.",
+    title: brief.preparedFor ? "Indicators you report" : "Headline indicators",
+    empty: brief.preparedFor ? "No reported indicators are linked to this agency." : "No headline indicators are selected.",
     columns: [
       { title: "Indicator", width: 0.37 },
       { title: "Latest", width: 0.19, align: "right" as const },
@@ -232,8 +233,8 @@ function indicatorTable(brief: BriefData) {
 
 function actionTable(brief: BriefData) {
   return {
-    title: "Priority actions: completed and on track",
-    empty: "No priority actions are completed or on track.",
+    title: brief.preparedFor ? "Actions you lead: completed and on track" : "Priority actions: completed and on track",
+    empty: brief.preparedFor ? "No completed or on-track actions list this agency as lead." : "No priority actions are completed or on track.",
     columns: [
       { title: "Action", width: 0.6 },
       { title: "Lead institution", width: 0.18 },

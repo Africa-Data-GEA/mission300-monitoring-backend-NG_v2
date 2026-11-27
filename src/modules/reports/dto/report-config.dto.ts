@@ -50,6 +50,10 @@ export class ReportConfigDto {
   format!: ReportFormat;
 
   @IsOptional()
+  @IsString()
+  institutionId?: string;
+
+  @IsOptional()
   @IsIn(["portrait", "landscape"])
   orientation?: "portrait" | "landscape";
 

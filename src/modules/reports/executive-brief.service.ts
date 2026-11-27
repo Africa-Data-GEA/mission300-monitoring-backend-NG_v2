@@ -1,6 +1,7 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, NotFoundException } from "@nestjs/common";
 import { PrismaService } from "@/prisma/prisma.service";
 import { toKebabCase } from "@/common/utils/enum-casing";
+import { agencyAliases, belongsToAgency } from "@/modules/reports/agency-names";
 import { compareReportingValues } from "@/common/utils/reporting-period";
 import { formatPeriodLabel } from "@/modules/kpi-explorer/kpi-explorer.mappers";
 import { matchesPillars, type ReportConfigLike } from "@/modules/reports/reports.mappers";
@@ -27,6 +28,12 @@ export interface BriefSection {
 
 const AT_RISK_PROJECT_STATUSES = ["AT_RISK", "DELAYED", "BLOCKED"] as const;
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+interface Agency {
+  id: string;
+  name: string;
+  aliases: Set<string>;
+}
 
 export function toBriefSections(brief: BriefData): BriefSection[] {
   const { glance } = brief;
@@ -87,14 +94,16 @@ export class ExecutiveBriefService {
   constructor(private readonly prisma: PrismaService) {}
 
   async build(config: ReportConfigLike): Promise<{ sections: BriefSection[]; brief: BriefData }> {
+    const agency = await this.agencyFor(config);
     const [indicators, pillars, bottlenecks, actions] = await Promise.all([
-      this.headlineIndicators(config),
-      this.pillarProgress(config),
-      this.bottlenecksNeedingAction(config),
-      this.priorityActions(config),
+      this.headlineIndicators(config, agency),
+      this.pillarProgress(config, agency),
+      this.bottlenecksNeedingAction(config, agency),
+      this.priorityActions(config, agency),
     ]);
 
     const brief: BriefData = {
+      ...(agency ? { preparedFor: agency.name } : {}),
       glance: {
         indicatorsReported: indicators.reported,
         indicatorsTotal: indicators.items.length,
@@ -113,11 +122,21 @@ export class ExecutiveBriefService {
     return { sections: toBriefSections(brief), brief };
   }
 
-  private async headlineIndicators(config: ReportConfigLike) {
+  private async agencyFor(config: ReportConfigLike): Promise<Agency | null> {
+    if (!config.institutionId) return null;
+    const institution = await this.prisma.institution.findUnique({ where: { id: config.institutionId } });
+    if (!institution) throw new NotFoundException("The agency chosen for this report no longer exists.");
+    return { id: institution.id, name: institution.name, aliases: agencyAliases(institution.name) };
+  }
+
+  private async headlineIndicators(config: ReportConfigLike, agency: Agency | null) {
     const selectedPeriods = config.periods.includes("all") ? null : config.periods;
     const definitions = await this.prisma.kpiDefinition.findMany({
-      where: { code: { in: [...HEADLINE_KPI_CODES] }, isActive: true },
+      where: agency
+        ? { isActive: true, sourceInstitutions: { some: { institutionId: agency.id } } }
+        : { code: { in: [...HEADLINE_KPI_CODES] }, isActive: true },
       include: { pillar: true },
+      orderBy: { code: "asc" },
     });
     const byCode = new Map(definitions.map((definition) => [definition.code, definition]));
     const values = await this.prisma.kpiValue.findMany({
@@ -134,9 +153,10 @@ export class ExecutiveBriefService {
 
     let reported = 0;
     const items: BriefIndicator[] = [];
-    for (const code of HEADLINE_KPI_CODES) {
+    for (const code of agency ? definitions.map((definition) => definition.code) : HEADLINE_KPI_CODES) {
       const definition = byCode.get(code);
       if (!definition || !matchesPillars(config, definition.pillar.slug)) continue;
+      if (agency && !valuesByKpi.has(definition.id)) continue;
 
       const ordered = [...(valuesByKpi.get(definition.id) ?? [])].sort(compareReportingValues);
       const latest = ordered.at(-1);
@@ -157,19 +177,36 @@ export class ExecutiveBriefService {
     return { reported, items };
   }
 
-  private async pillarProgress(config: ReportConfigLike) {
-    const [pillars, projects, bottlenecks] = await Promise.all([
+  private async pillarProgress(config: ReportConfigLike, agency: Agency | null) {
+    const [pillars, allProjects, allBottlenecks] = await Promise.all([
       this.prisma.pillar.findMany({ orderBy: { name: "asc" } }),
-      this.prisma.project.findMany({ select: { currentStatus: true, pillar: { select: { slug: true } } } }),
+      this.prisma.project.findMany({
+        select: {
+          currentStatus: true,
+          owner: true,
+          programme: { select: { leadInstitutionId: true } },
+          pillar: { select: { slug: true } },
+        },
+      }),
       this.prisma.bottleneck.findMany({
         where: { status: { not: "RESOLVED" } },
-        select: { pillar: { select: { slug: true } } },
+        select: { institution: true, pillar: { select: { slug: true } } },
       }),
     ]);
+    const projects = agency
+      ? allProjects.filter(
+          (project) =>
+            project.programme?.leadInstitutionId === agency.id || belongsToAgency(project.owner, agency.aliases),
+        )
+      : allProjects;
+    const bottlenecks = agency
+      ? allBottlenecks.filter((bottleneck) => belongsToAgency(bottleneck.institution, agency.aliases))
+      : allBottlenecks;
 
     let atRiskProjects = 0;
     const items: BriefPillar[] = pillars
       .filter((pillar) => matchesPillars(config, pillar.slug))
+      .filter((pillar) => !agency || projects.some((p) => p.pillar.slug === pillar.slug) || bottlenecks.some((b) => b.pillar.slug === pillar.slug))
       .map((pillar) => {
         const own = projects.filter((project) => project.pillar.slug === pillar.slug);
         const onTrack = own.filter((project) => project.currentStatus === "ON_TRACK" || project.currentStatus === "COMPLETED").length;
@@ -184,13 +221,15 @@ export class ExecutiveBriefService {
     return { atRiskProjects, items };
   }
 
-  private async bottlenecksNeedingAction(config: ReportConfigLike) {
+  private async bottlenecksNeedingAction(config: ReportConfigLike, agency: Agency | null) {
     const now = Date.now();
     const records = await this.prisma.bottleneck.findMany({
       where: { status: { not: "RESOLVED" } },
       include: { pillar: true },
     });
-    const scoped = records.filter((record) => matchesPillars(config, record.pillar.slug));
+    const scoped = records.filter(
+      (record) => matchesPillars(config, record.pillar.slug) && (!agency || belongsToAgency(record.institution, agency.aliases)),
+    );
     const open = scoped.filter((record) => record.severity === "CRITICAL" || record.severity === "HIGH").length;
     const items: BriefBottleneck[] = rankBottlenecks(scoped)
       .slice(0, BRIEF_BOTTLENECK_LIMIT)
@@ -205,11 +244,13 @@ export class ExecutiveBriefService {
     return { open, items };
   }
 
-  private async priorityActions(config: ReportConfigLike) {
+  private async priorityActions(config: ReportConfigLike, agency: Agency | null) {
     const records = await this.prisma.reformAction.findMany({ include: { pillar: true } });
-    const scoped = records.filter((record) => matchesPillars(config, record.pillar.slug));
+    const scoped = records.filter(
+      (record) => matchesPillars(config, record.pillar.slug) && (!agency || belongsToAgency(record.leadInstitution, agency.aliases)),
+    );
     const priority = scoped.filter((record) => record.isPriority);
-    const pool = priority.length > 0 ? priority : scoped;
+    const pool = agency || priority.length === 0 ? scoped : priority;
     const delayed = pool.filter((record) => record.status === "DELAYED" || record.status === "IN_PROGRESS_AT_RISK").length;
 
     const completed = pool.filter((record) => record.status === "COMPLETED").length;

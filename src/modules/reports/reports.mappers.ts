@@ -197,6 +197,7 @@ export interface ReportConfigLike {
   programmeOrAgency: string;
   validationStatus: string;
   readinessTier: string;
+  institutionId?: string;
 }
 
 /** Matches appliedFilterSchema[] exactly - validation status is always included, per the real mock's own comment (whether a report includes non-validated data is essential context either way). */
@@ -276,6 +277,7 @@ export function configSignature(config: ReportConfigLike & { reportType: string 
     programmeOrAgency: config.programmeOrAgency,
     validationStatus: config.validationStatus,
     readinessTier: config.readinessTier,
+    institutionId: config.institutionId,
   });
 }
 

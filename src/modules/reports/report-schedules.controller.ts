@@ -18,6 +18,11 @@ export class ReportSchedulesController {
     return this.schedules.list();
   }
 
+  @Get("audiences")
+  audiences() {
+    return this.schedules.audiences();
+  }
+
   @Post()
   @AuditAction("report_schedule.created")
   create(@CurrentUser() user: AuthenticatedUser, @Body() dto: ReportScheduleDto) {
